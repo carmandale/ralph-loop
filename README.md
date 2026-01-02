@@ -1,76 +1,76 @@
 # Ralph Loop
 
-A CLI tool for RALPH-driven development - agentic AI coding with structured loops and multi-agent collaboration.
+Keep your AI agent on track with structured loops.
 
 ## The Problem
 
-AI coding agents often:
-- Rush ahead with quick fixes instead of understanding
-- Drift off track during complex tasks
-- Produce code that doesn't build
-- Skip getting help when stuck
+AI agents drift. They rush ahead, skip steps, produce code that doesn't build.
 
 ## The Solution
 
-Ralph Loop enforces disciplined, loop-based development:
+A simple loop:
 
 ```
-Plan → Checklist → Loop {
-    Pick task
-    Execute (with THINK.ALIGN.ACT)
-    Verify build
-    Re-read plan
-} → Done
+Plan → Task → Execute → Verify Build → Next Task
+         ↑                    |
+         └────────────────────┘
 ```
 
-## Core Principles
+## Quick Start
 
-### North Star
-> "Working Code Over Perfect Code"
-> The best code is no code. The second best is working code.
+```bash
+# Create a plan
+ralph init "Add user authentication"
 
-### THINK. ALIGN. ACT Protocol
-- **THINK** - Understand before acting
-- **ALIGN** - Get approval on significant work  
-- **ACT** - Execute only after thinking and aligning
+# Work through tasks
+ralph next    # See next task, launch Pi
+# ... Pi works ...
+ralph done    # Mark complete, verify build
 
-### Multi-Agent Collaboration
-When stuck, don't quick-fix. Get help:
-- Ask the Oracle (GPT-5 Pro)
-- Have another agent review
-- Get a second opinion
+# Stuck? Get help
+ralph stuck   # Ask Oracle or run codex review
+```
 
-## RALPH Phases
+## How It Works
 
-| Phase | Purpose |
-|-------|---------|
-| **R**esearch | Understand codebase, read docs |
-| **A**nalyze | Break down the problem |
-| **L**ist | Create actionable checklist |
-| **P**roduce | Generate code |
-| **H**armonize | Review, test, refine |
+1. **You create a plan** - Markdown file with checkbox tasks
+2. **Loop through one task at a time** - Focus prevents drift
+3. **Verify build after each task** - Catches problems early
+4. **Get help when stuck** - Oracle for advice, Codex for review
 
-## Supported Agents
+## Agent Roles
 
-- **Pi** (pi-coding-agent) - primary
-- **OpenCode**
-- **Codex**  
-- **Claude**
+| Role | Tool | When |
+|------|------|------|
+| Worker | Pi | All coding |
+| Advisor | Oracle | Hard problems |
+| Reviewer | `codex review` | Before commits |
 
-## Integrations
+## Philosophy
 
-- Git (commits, branches, history)
-- Beads (issue tracking)
+> "Working code over perfect code."
 
-## Status
+- No over-engineering
+- No abstraction layers
+- No multi-agent orchestration
+- Just enough structure to ship
 
-🚧 Under Development
+## Installation
 
-See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for full requirements.
+```bash
+# Coming soon
+npm install -g ralph-loop
+```
 
-## References
+## Commands
 
-- [Stop Chatting With AI, Start Loops: RALPH-Driven Development](https://lukeparker.dev/stop-chatting-with-ai-start-loops-ralph-driven-development)
+| Command | Description |
+|---------|-------------|
+| `ralph init "desc"` | Create new plan |
+| `ralph next` | Show/start next task |
+| `ralph done` | Mark task complete |
+| `ralph stuck` | Get help |
+| `ralph status` | Show progress |
 
 ## License
 

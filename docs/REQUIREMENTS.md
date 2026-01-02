@@ -1,84 +1,124 @@
-# Ralph Loop - Requirements
+# Ralph Loop - Requirements (v2 - Simplified)
 
-## Core Concept
+## North Star Check ✓
 
-Create a great plan, turn it into a checklist, and have an agent work in a loop:
-1. Pick one task
-2. Execute it
-3. Re-read the plan 
-4. Build to verify
-5. Repeat
+> "The best code is no code. The second best is working code."
 
-**Goals:**
-- A. Code always builds
-- B. Agent doesn't get off track
+This tool should be **minimal**. No abstraction layers. No multi-provider plugins.
+Just enough structure to keep an agent on track.
 
-## Key Philosophy Integration
+---
 
-### North Star
-"Working Code Over Perfect Code" - The best code is no code, the second best is working code.
+## What It Does
 
-### THINK. ALIGN. ACT Protocol
-Prevent agents from rushing ahead with quick fixes. Force them to:
-- **THINK** - Actually understand before acting
-- **ALIGN** - Get approval on significant work
-- **ACT** - Execute only after thinking and aligning
+1. **Create a plan** (markdown file with checkboxes)
+2. **Loop through tasks** (one at a time)
+3. **Verify builds** (after each task)
+4. **Get help when stuck** (Oracle or code review)
 
-**Key insight**: Agents often rush ahead. The loop should encourage getting help over quick fixes.
+---
 
-## Technical Requirements
+## Core Loop
 
-### Tool Type
-CLI tool that runs in terminal and orchestrates AI loops
+```
+ralph init "Add user authentication"
+    ↓
+Creates: .ralph/plans/001-add-user-auth.md
+    ↓
+ralph next
+    ↓
+Shows next unchecked task, launches Pi with context
+    ↓
+Pi works... you verify build works
+    ↓
+ralph done   # marks task complete
+ralph stuck  # triggers help workflow
+    ↓
+Repeat until plan complete
+```
 
-### Supported Agents
-- **Pi** (pi-coding-agent) - primary/favorite
-- **OpenCode** 
-- **Codex**
-- **Claude** (Claude Code / API)
+---
 
-### Automation Level
-Configurable per-loop:
-- Fully automatic
-- Semi-automatic (pause at phases)
-- Interactive (user guides each step)
+## Agent Strategy (Simplified)
 
-### RALPH Phases (All Required)
-- **R**esearch - codebase analysis, doc reading
-- **A**nalyze - problem decomposition
-- **L**ist - task/plan generation (checklist)
-- **P**roduce - code generation
-- **H**armonize - review, test, refine
+| Role | Tool | When |
+|------|------|------|
+| **Worker** | Pi | All development work |
+| **Advisor** | Oracle (via pi skill) | Hard problems, architecture questions |
+| **Reviewer** | `codex review` CLI | Code review before commits |
 
-### Integrations
-- Git (commits, branches, history)
-- Beads (issue tracker)
+**No multi-agent orchestration.** Just three tools you call when needed.
 
-### Language
-TypeScript/Node.js (recommended for ecosystem alignment with pi-coding-agent)
+---
 
-## Priority Features
+## Plan Format
 
-### 1. Loop-Based Execution
-- Create plan → checklist → loop through tasks
-- Re-read plan each iteration
-- Build verification each iteration
+Plain markdown. No special schema.
 
-### 2. Multi-Agent Collaboration
-- Ask the Oracle (GPT-5 Pro) for help
-- Have one agent (Codex) review another's (Claude) code
-- "Get another agent's eyes" when stuck
+```markdown
+# Plan: Add User Authentication
 
-### 3. Guard Rails
-- Prevent rushing ahead
-- Force alignment checks
-- Encourage asking for help over quick fixes
+## Context
+[Brief description of what we're building]
 
-## Current Workflow (to improve upon)
-Pi is the primary tool currently in use.
+## Tasks
+- [ ] Create User model with email/password
+- [ ] Add bcrypt for password hashing  
+- [ ] Create login endpoint
+- [ ] Create signup endpoint
+- [ ] Add JWT token generation
+- [ ] Add auth middleware
+- [ ] Write tests
 
-## Open Questions
-- How to coordinate multiple agents?
-- What triggers "ask for help" vs "proceed"?
-- How to track loop state/progress?
-- Plan storage format (markdown? beads? structured JSON?)
+## Notes
+[Learnings, decisions, blockers]
+```
+
+---
+
+## Commands (MVP)
+
+```bash
+ralph init "description"  # Create new plan
+ralph next                # Show next task, optionally launch Pi
+ralph done                # Mark current task complete
+ralph stuck               # Get help (Oracle or codex review)
+ralph status              # Show plan progress
+```
+
+---
+
+## Implementation
+
+**Language**: Shell script (bash) for MVP. TypeScript later if needed.
+
+**Storage**: `.ralph/` directory in project root
+- `plans/` - markdown plan files
+- `current` - symlink or file pointing to active plan
+
+**Dependencies**: 
+- `pi` (pi-coding-agent)
+- `codex` (codex CLI) - optional, for reviews
+- Oracle skill in pi - optional, for hard questions
+
+---
+
+## What We're NOT Building
+
+- ❌ Multi-provider plugin system
+- ❌ Complex automation modes  
+- ❌ Structured plan schemas (JSON/YAML)
+- ❌ Agent coordination layer
+- ❌ Custom guard rails (use AGENTS.md)
+- ❌ Beads integration (can add later if valuable)
+- ❌ Git integration beyond what Pi already does
+
+---
+
+## Success Criteria
+
+1. Can create a plan in under 30 seconds
+2. Loop keeps agent focused on ONE task
+3. Build verification catches drift
+4. Help is one command away
+5. **Total code < 500 lines**
