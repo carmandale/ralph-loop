@@ -1,0 +1,10 @@
+# Ralph working directory (each project has its own)
+.ralph/
+
+# OS files
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+*~

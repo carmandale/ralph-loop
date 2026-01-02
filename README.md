@@ -65,8 +65,13 @@ See [docs/GOLD-STARS.md](docs/GOLD-STARS.md) for details.
 ## Installation
 
 ```bash
-# Coming soon
-npm install -g ralph-loop
+# Clone and install
+git clone https://github.com/carmandale/ralph-loop.git
+cd ralph-loop
+./install.sh
+
+# Or manually copy to your PATH
+cp bin/ralph /usr/local/bin/
 ```
 
 ## Commands

@@ -1,0 +1,537 @@
+#!/usr/bin/env bash
+#
+# ralph - Keep your AI agent on track with structured loops
+# https://github.com/carmandale/ralph-loop
+#
+
+set -euo pipefail
+
+VERSION="0.1.0"
+RALPH_DIR=".ralph"
+PLANS_DIR="$RALPH_DIR/plans"
+CURRENT_FILE="$RALPH_DIR/current"
+CONFIG_FILE="$RALPH_DIR/config"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+#------------------------------------------------------------------------------
+# Helpers
+#------------------------------------------------------------------------------
+
+die() { echo -e "${RED}Error: $1${NC}" >&2; exit 1; }
+info() { echo -e "${BLUE}$1${NC}"; }
+success() { echo -e "${GREEN}$1${NC}"; }
+warn() { echo -e "${YELLOW}$1${NC}"; }
+
+ensure_init() {
+    [[ -d "$RALPH_DIR" ]] || die "Not a ralph project. Run 'ralph init \"description\"' first."
+}
+
+get_current_plan() {
+    ensure_init
+    [[ -f "$CURRENT_FILE" ]] || die "No active plan. Run 'ralph init \"description\"' to create one."
+    cat "$CURRENT_FILE"
+}
+
+get_build_command() {
+    if [[ -f "$CONFIG_FILE" ]] && grep -q "^build=" "$CONFIG_FILE"; then
+        grep "^build=" "$CONFIG_FILE" | cut -d= -f2-
+    elif [[ -f "package.json" ]]; then
+        echo "npm run build"
+    elif [[ -f "Cargo.toml" ]]; then
+        echo "cargo build"
+    elif [[ -f "Makefile" ]]; then
+        echo "make"
+    elif [[ -f "go.mod" ]]; then
+        echo "go build ./..."
+    else
+        echo ""
+    fi
+}
+
+# Parse tasks from markdown, returns: status|line_number|task_text
+parse_tasks() {
+    local plan_file="$1"
+    awk '
+    /^- \[ \]/ { print "pending|" NR "|" substr($0, 7) }
+    /^- \[x\]/ { print "done|" NR "|" substr($0, 7) }
+    /^- \[X\]/ { print "done|" NR "|" substr($0, 7) }
+    ' "$plan_file"
+}
+
+count_tasks() {
+    local plan_file="$1"
+    local status="$2"
+    parse_tasks "$plan_file" | grep "^$status|" | wc -l | tr -d ' '
+}
+
+get_next_task() {
+    local plan_file="$1"
+    parse_tasks "$plan_file" | grep "^pending|" | head -1
+}
+
+get_current_task_line() {
+    local plan_file="$1"
+    get_next_task "$plan_file" | cut -d'|' -f2
+}
+
+mark_task_done() {
+    local plan_file="$1"
+    local line_num="$2"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "${line_num}s/- \[ \]/- [x]/" "$plan_file"
+    else
+        sed -i "${line_num}s/- \[ \]/- [x]/" "$plan_file"
+    fi
+}
+
+#------------------------------------------------------------------------------
+# Commands
+#------------------------------------------------------------------------------
+
+cmd_init() {
+    local description="${1:-}"
+    [[ -n "$description" ]] || die "Usage: ralph init \"description\""
+    
+    # Create directory structure
+    mkdir -p "$PLANS_DIR"
+    
+    # Generate plan filename
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local slug=$(echo "$description" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | cut -c1-40)
+    local plan_file="$PLANS_DIR/${timestamp}-${slug}.md"
+    
+    # Create plan template
+    cat > "$plan_file" << EOF
+# Plan: $description
+
+## Context
+[Describe what you're building and why]
+
+## Tasks
+- [ ] Task 1: [First concrete step]
+- [ ] Task 2: [Second step]
+- [ ] Task 3: [Third step]
+
+## Notes
+- $(date +%Y-%m-%d): Plan created
+
+EOF
+    
+    # Set as current plan
+    echo "$plan_file" > "$CURRENT_FILE"
+    
+    # Create default config if it doesn't exist
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        local build_cmd=$(get_build_command)
+        cat > "$CONFIG_FILE" << EOF
+# Ralph configuration
+# build=npm run build
+EOF
+        [[ -n "$build_cmd" ]] && echo "build=$build_cmd" >> "$CONFIG_FILE"
+    fi
+    
+    success "✓ Created plan: $plan_file"
+    info "Edit the plan to add your tasks, then run 'ralph next'"
+    echo ""
+    echo -e "${CYAN}Tip: Open the plan in your editor:${NC}"
+    echo "  \$EDITOR $plan_file"
+}
+
+cmd_next() {
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+    
+    local next_task=$(get_next_task "$plan_file")
+    
+    if [[ -z "$next_task" ]]; then
+        success "🎉 All tasks complete!"
+        cmd_status
+        return 0
+    fi
+    
+    local task_text=$(echo "$next_task" | cut -d'|' -f3)
+    local done_count=$(count_tasks "$plan_file" "done")
+    local total_count=$((done_count + $(count_tasks "$plan_file" "pending")))
+    
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}RALPH LOOP - Task $((done_count + 1)) of $total_count${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}▶ CURRENT TASK:${NC}"
+    echo -e "  ${BOLD}$task_text${NC}"
+    echo ""
+    
+    # Generate context for Pi
+    local context_file=$(mktemp)
+    cat > "$context_file" << EOF
+You are continuing work on this plan. Read it carefully before acting.
+
+$(cat "$plan_file")
+
+═══════════════════════════════════════════════════════════════
+PROGRESS: $done_count of $total_count tasks complete
+═══════════════════════════════════════════════════════════════
+
+YOUR CURRENT TASK:
+→ $task_text
+
+CRITICAL INSTRUCTIONS:
+1. Focus ONLY on this task. Do NOT proceed to the next task.
+2. When done, tell the user to run 'ralph done' to verify and continue.
+3. If stuck, tell the user to run 'ralph stuck' for help.
+
+BEFORE ACTING, follow THINK.ALIGN.ACT:
+
+THINK: Do you understand this task? What files are involved?
+       Read relevant code before making changes.
+
+ALIGN: Is this a significant change (multiple files, new patterns)?
+       If so, describe your plan and wait for approval.
+
+ACT:   Only proceed after thinking and aligning.
+       If uncertain about ANYTHING, ask. Don't guess.
+
+═══════════════════════════════════════════════════════════════
+EOF
+
+    echo -e "${CYAN}Context prepared. Launch Pi?${NC}"
+    echo ""
+    echo "  1) Yes - launch pi with context"
+    echo "  2) No - just show me the context"
+    echo "  3) Copy context to clipboard"
+    echo ""
+    read -p "Choice [1]: " choice
+    choice=${choice:-1}
+    
+    case "$choice" in
+        1)
+            info "Launching pi..."
+            echo ""
+            # Launch pi with the context as initial prompt
+            pi --prompt "$(cat "$context_file")"
+            ;;
+        2)
+            echo ""
+            echo -e "${CYAN}─────────────── CONTEXT FOR PI ───────────────${NC}"
+            cat "$context_file"
+            echo -e "${CYAN}───────────────────────────────────────────────${NC}"
+            ;;
+        3)
+            if command -v pbcopy &> /dev/null; then
+                cat "$context_file" | pbcopy
+                success "✓ Context copied to clipboard"
+            elif command -v xclip &> /dev/null; then
+                cat "$context_file" | xclip -selection clipboard
+                success "✓ Context copied to clipboard"
+            else
+                warn "No clipboard command found. Here's the context:"
+                cat "$context_file"
+            fi
+            ;;
+    esac
+    
+    rm -f "$context_file"
+    
+    echo ""
+    echo -e "${CYAN}When done with this task:${NC}"
+    echo "  ralph done   - verify build & mark complete"
+    echo "  ralph stuck  - get help"
+}
+
+cmd_done() {
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+    
+    local next_task=$(get_next_task "$plan_file")
+    [[ -n "$next_task" ]] || { success "🎉 All tasks already complete!"; return 0; }
+    
+    local task_text=$(echo "$next_task" | cut -d'|' -f3)
+    local line_num=$(echo "$next_task" | cut -d'|' -f2)
+    
+    echo ""
+    echo -e "${YELLOW}Completing task:${NC} $task_text"
+    echo ""
+    
+    # Build verification gate ⭐
+    local build_cmd=$(get_build_command)
+    if [[ -n "$build_cmd" ]]; then
+        info "Running build verification: $build_cmd"
+        echo ""
+        if eval "$build_cmd"; then
+            success "✓ Build passed"
+        else
+            echo ""
+            die "Build failed. Fix the build before marking task done.\n\nRun 'ralph stuck' if you need help."
+        fi
+        echo ""
+    else
+        warn "No build command configured. Skipping build verification."
+        echo "  Tip: Add 'build=your-command' to .ralph/config"
+        echo ""
+    fi
+    
+    # Mark task complete
+    mark_task_done "$plan_file" "$line_num"
+    success "✓ Task marked complete"
+    
+    # Show progress
+    echo ""
+    cmd_status
+    
+    # Prompt for next
+    local remaining=$(count_tasks "$plan_file" "pending")
+    if [[ "$remaining" -gt 0 ]]; then
+        echo ""
+        echo -e "${CYAN}Run 'ralph next' to continue${NC}"
+    fi
+}
+
+cmd_stuck() {
+    local plan_file=$(get_current_plan)
+    
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}RALPH - GET HELP${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "What kind of help do you need?"
+    echo ""
+    echo "  1) Ask Oracle      - Architecture, design, hard problems"
+    echo "  2) Code Review     - Run 'codex review' on recent changes"
+    echo "  3) Show Plan       - Re-read the full plan"
+    echo "  4) Add Note        - Capture what you've learned"
+    echo "  5) Skip Task       - Mark current task as skipped (add note)"
+    echo "  6) Exit            - Back to work"
+    echo ""
+    read -p "Choice [1]: " choice
+    choice=${choice:-1}
+    
+    case "$choice" in
+        1)
+            echo ""
+            info "Launching pi with Oracle skill..."
+            echo ""
+            local task_info=""
+            if [[ -f "$plan_file" ]]; then
+                local next_task=$(get_next_task "$plan_file")
+                if [[ -n "$next_task" ]]; then
+                    task_info="Current task: $(echo "$next_task" | cut -d'|' -f3)"
+                fi
+            fi
+            # Launch pi and tell it to consult Oracle
+            pi --prompt "I'm stuck and need to consult the Oracle for help.
+
+$task_info
+
+Please use the oracle skill to help me think through this problem. Load the skill from /Users/dalecarman/.pi/agent/skills/oracle/SKILL.md and ask me what I need help with."
+            ;;
+        2)
+            echo ""
+            info "Running codex review..."
+            echo ""
+            if command -v codex &> /dev/null; then
+                codex review
+            else
+                warn "codex CLI not found. Install it or run review manually."
+            fi
+            ;;
+        3)
+            echo ""
+            if [[ -f "$plan_file" ]]; then
+                cat "$plan_file"
+            else
+                warn "No active plan"
+            fi
+            ;;
+        4)
+            echo ""
+            read -p "Note: " note_text
+            if [[ -n "$note_text" ]]; then
+                cmd_note "$note_text"
+            fi
+            ;;
+        5)
+            echo ""
+            read -p "Reason for skipping: " skip_reason
+            if [[ -n "$skip_reason" ]]; then
+                cmd_note "SKIPPED: $skip_reason"
+                # Mark as done (but with skip note)
+                local line_num=$(get_current_task_line "$plan_file")
+                if [[ -n "$line_num" ]]; then
+                    mark_task_done "$plan_file" "$line_num"
+                    success "✓ Task skipped"
+                fi
+            fi
+            ;;
+        6|*)
+            info "Back to work!"
+            ;;
+    esac
+}
+
+cmd_status() {
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+    
+    local done_count=$(count_tasks "$plan_file" "done")
+    local pending_count=$(count_tasks "$plan_file" "pending")
+    local total=$((done_count + pending_count))
+    
+    [[ $total -eq 0 ]] && { warn "No tasks in plan"; return 0; }
+    
+    local percent=$((done_count * 100 / total))
+    local bar_width=30
+    local filled=$((percent * bar_width / 100))
+    local empty=$((bar_width - filled))
+    
+    # Build progress bar
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    
+    # Get plan title
+    local title=$(head -1 "$plan_file" | sed 's/^# //' | sed 's/^Plan: //')
+    
+    echo ""
+    echo -e "${BOLD}Plan:${NC} $title"
+    echo -e "${BOLD}Progress:${NC} $bar $done_count/$total ($percent%)"
+    echo ""
+    
+    # Show tasks
+    local current_shown=false
+    while IFS='|' read -r status line_num task_text; do
+        if [[ "$status" == "done" ]]; then
+            echo -e "  ${GREEN}✓${NC} $task_text"
+        elif [[ "$current_shown" == false ]]; then
+            echo -e "  ${YELLOW}→${NC} ${BOLD}$task_text${NC}  ${CYAN}← CURRENT${NC}"
+            current_shown=true
+        else
+            echo -e "  ${BLUE}○${NC} $task_text"
+        fi
+    done < <(parse_tasks "$plan_file")
+    
+    # Show recent notes
+    local notes=$(grep -A100 "^## Notes" "$plan_file" 2>/dev/null | tail -n +2 | grep "^- " | tail -3)
+    if [[ -n "$notes" ]]; then
+        echo ""
+        echo -e "${CYAN}Recent notes:${NC}"
+        echo "$notes" | while read -r note; do
+            echo "  $note"
+        done
+    fi
+    
+    echo ""
+}
+
+cmd_note() {
+    local note_text="${1:-}"
+    [[ -n "$note_text" ]] || { read -p "Note: " note_text; }
+    [[ -n "$note_text" ]] || die "No note provided"
+    
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+    
+    local timestamp=$(date +%Y-%m-%d)
+    local note_line="- $timestamp: $note_text"
+    
+    # Append note to Notes section
+    if grep -q "^## Notes" "$plan_file"; then
+        # Find the Notes section and append
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "/^## Notes/a\\
+$note_line
+" "$plan_file"
+        else
+            sed -i "/^## Notes/a $note_line" "$plan_file"
+        fi
+    else
+        # Add Notes section
+        echo "" >> "$plan_file"
+        echo "## Notes" >> "$plan_file"
+        echo "$note_line" >> "$plan_file"
+    fi
+    
+    success "✓ Note added"
+}
+
+cmd_plan() {
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+    
+    # Open in editor
+    ${EDITOR:-vim} "$plan_file"
+}
+
+cmd_help() {
+    cat << EOF
+${BOLD}ralph${NC} - Keep your AI agent on track with structured loops
+
+${BOLD}USAGE${NC}
+    ralph <command> [args]
+
+${BOLD}COMMANDS${NC}
+    init "desc"     Create a new plan
+    next            Show next task, launch Pi with context
+    done            Verify build, mark task complete
+    stuck           Get help (Oracle, code review, etc.)
+    status          Show plan progress
+    note "msg"      Add timestamped note to plan
+    plan            Open plan in editor
+    help            Show this help
+
+${BOLD}WORKFLOW${NC}
+    1. ralph init "Add user auth"    # Create plan
+    2. Edit plan to add tasks        # \$EDITOR .ralph/plans/...
+    3. ralph next                    # Start first task
+    4. ... work with Pi ...
+    5. ralph done                    # Verify build, continue
+    6. ralph stuck                   # If you need help
+    7. Repeat until complete
+
+${BOLD}GOLD STARS${NC}
+    ⭐ Re-Read Loop    - Full context every iteration
+    ⭐ One Task Focus  - No scope creep
+    ⭐ Build Gate      - Must build to proceed
+    ⭐ Stuck → Help    - Lower friction than hacking
+    ⭐ THINK.ALIGN.ACT - Discipline in prompts
+    ⭐ Living Notes    - Capture decisions
+    ⭐ Progress Visible - Always know where you are
+
+${BOLD}VERSION${NC}
+    $VERSION
+
+EOF
+}
+
+#------------------------------------------------------------------------------
+# Main
+#------------------------------------------------------------------------------
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    
+    case "$cmd" in
+        init)   cmd_init "$@" ;;
+        next)   cmd_next "$@" ;;
+        done)   cmd_done "$@" ;;
+        stuck)  cmd_stuck "$@" ;;
+        status) cmd_status "$@" ;;
+        note)   cmd_note "$@" ;;
+        plan)   cmd_plan "$@" ;;
+        help|--help|-h) cmd_help ;;
+        version|--version|-v) echo "ralph $VERSION" ;;
+        *)      die "Unknown command: $cmd. Run 'ralph help' for usage." ;;
+    esac
+}
+
+main "$@"
