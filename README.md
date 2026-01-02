@@ -4,16 +4,16 @@ Keep your AI agent on track with structured loops.
 
 ## The Problem
 
-AI agents drift. They rush ahead, skip steps, produce code that doesn't build.
+AI agents drift. They rush ahead, skip steps, produce code that doesn't build. When stuck, they hack instead of asking for help.
 
 ## The Solution
 
-A simple loop:
+A disciplined loop with seven gold stars:
 
 ```
-Plan → Task → Execute → Verify Build → Next Task
-         ↑                    |
-         └────────────────────┘
+Re-read Plan → One Task → Execute with Discipline → Verify Build → Repeat
+                              ↓
+                         Stuck? → Get Help (not quick fixes)
 ```
 
 ## Quick Start
@@ -31,12 +31,19 @@ ralph done    # Mark complete, verify build
 ralph stuck   # Ask Oracle or run codex review
 ```
 
-## How It Works
+## Gold Stars ⭐
 
-1. **You create a plan** - Markdown file with checkbox tasks
-2. **Loop through one task at a time** - Focus prevents drift
-3. **Verify build after each task** - Catches problems early
-4. **Get help when stuck** - Oracle for advice, Codex for review
+| Feature | Why It's Magic |
+|---------|----------------|
+| **Re-Read Loop** | Agent sees full plan context every iteration. No drift. |
+| **One Task Focus** | "Do this task. Do NOT proceed to next." Prevents chaos. |
+| **Build Gate** | Must build before marking done. Catches problems early. |
+| **Stuck → Help** | Lower friction to ask Oracle than to hack a workaround. |
+| **THINK.ALIGN.ACT** | Discipline protocol baked into every prompt. |
+| **Living Notes** | Capture decisions and learnings in the plan. |
+| **Progress Visible** | Always know where you are: "4/7 tasks (57%)" |
+
+See [docs/GOLD-STARS.md](docs/GOLD-STARS.md) for details.
 
 ## Agent Roles
 

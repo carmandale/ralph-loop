@@ -80,10 +80,11 @@ Plain markdown. No special schema.
 
 ```bash
 ralph init "description"  # Create new plan
-ralph next                # Show next task, optionally launch Pi
-ralph done                # Mark current task complete
+ralph next                # Show next task, launch Pi with full context
+ralph done                # Verify build, mark task complete
 ralph stuck               # Get help (Oracle or codex review)
-ralph status              # Show plan progress
+ralph status              # Show progress (4/7 tasks, 57%)
+ralph note "message"      # Add timestamped note to plan
 ```
 
 ---
@@ -122,3 +123,19 @@ ralph status              # Show plan progress
 3. Build verification catches drift
 4. Help is one command away
 5. **Total code < 500 lines**
+
+---
+
+## Gold Stars (DO NOT CUT)
+
+See [GOLD-STARS.md](GOLD-STARS.md) for the seven features that make this magical:
+
+1. ⭐ **Re-Read Loop** - Full context every iteration
+2. ⭐ **One Task Focus** - No scope creep
+3. ⭐ **Build Gate** - Must build to proceed
+4. ⭐ **Stuck → Help** - Lower friction than hacking
+5. ⭐ **THINK.ALIGN.ACT** - Discipline in prompts
+6. ⭐ **Living Notes** - Capture decisions
+7. ⭐ **Progress Visible** - Always know where you are
+
+These are non-negotiable. Everything else can flex.
