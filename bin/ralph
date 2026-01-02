@@ -218,6 +218,28 @@ EOF
             echo ""
             # Launch pi with the context as initial prompt
             pi --prompt "$(cat "$context_file")"
+            
+            # Pi exited - auto-prompt for completion
+            rm -f "$context_file"
+            echo ""
+            echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+            echo -e "${CYAN}Pi session ended. What's next?${NC}"
+            echo ""
+            echo "  1) Done - verify build & mark complete"
+            echo "  2) Continue - launch Pi again for this task"
+            echo "  3) Stuck - get help (Oracle, code review)"
+            echo "  4) Exit - come back later"
+            echo ""
+            read -p "Choice [1]: " post_choice
+            post_choice=${post_choice:-1}
+            
+            case "$post_choice" in
+                1) cmd_done ;;
+                2) cmd_next ;;  # Recursive - launch again
+                3) cmd_stuck ;;
+                *) info "Run 'ralph next' to continue later" ;;
+            esac
+            return
             ;;
         2)
             echo ""
@@ -287,11 +309,17 @@ cmd_done() {
     echo ""
     cmd_status
     
-    # Prompt for next
+    # Prompt for next task
     local remaining=$(count_tasks "$plan_file" "pending")
     if [[ "$remaining" -gt 0 ]]; then
         echo ""
-        echo -e "${CYAN}Run 'ralph next' to continue${NC}"
+        read -p "Start next task? [Y/n]: " start_next
+        start_next=${start_next:-y}
+        if [[ "$start_next" =~ ^[Yy] ]]; then
+            cmd_next
+        else
+            info "Run 'ralph next' when ready"
+        fi
     fi
 }
 
