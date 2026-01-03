@@ -89,6 +89,24 @@ get_current_task_line() {
     get_next_task "$plan_file" | cut -d'|' -f2
 }
 
+# Helper to get Pi session status from a session file
+get_session_status() {
+    local session_file="$1"
+    local last_line=$(tail -1 "$session_file" 2>/dev/null)
+    local stop_reason=$(echo "$last_line" | grep -o '"stopReason":"[^"]*"' | cut -d'"' -f4)
+    local error_msg=$(echo "$last_line" | grep -o '"errorMessage":"[^"]*"' | cut -d'"' -f4)
+    
+    if [[ "$stop_reason" == "error" ]]; then
+        echo "❌ ${error_msg:-error}"
+    elif [[ "$stop_reason" == "endTurn" || "$stop_reason" == "stop" ]]; then
+        echo "✓"
+    elif [[ -n "$stop_reason" ]]; then
+        echo "• $stop_reason"
+    else
+        echo "?"
+    fi
+}
+
 mark_task_done() {
     local plan_file="$1"
     local line_num="$2"
@@ -793,24 +811,6 @@ cmd_log() {
         echo "  Sessions dir: $sessions_dir"
         return 1
     fi
-    
-    # Helper to get session status
-    get_session_status() {
-        local session_file="$1"
-        local last_line=$(tail -1 "$session_file" 2>/dev/null)
-        local stop_reason=$(echo "$last_line" | grep -o '"stopReason":"[^"]*"' | cut -d'"' -f4)
-        local error_msg=$(echo "$last_line" | grep -o '"errorMessage":"[^"]*"' | cut -d'"' -f4)
-        
-        if [[ "$stop_reason" == "error" ]]; then
-            echo "❌ ${error_msg:-error}"
-        elif [[ "$stop_reason" == "endTurn" || "$stop_reason" == "stop" ]]; then
-            echo "✓"
-        elif [[ -n "$stop_reason" ]]; then
-            echo "• $stop_reason"
-        else
-            echo "?"
-        fi
-    }
     
     # Show recent sessions with status
     echo -e "${CYAN}Recent sessions:${NC}"
