@@ -678,6 +678,13 @@ cmd_yolo() {
             success "🎉 YOLO COMPLETE - All tasks finished!"
             success "═══════════════════════════════════════════════════════════════"
             cmd_status
+            
+            # Final codex review
+            echo ""
+            if command -v codex &> /dev/null; then
+                info "Running final codex review..."
+                codex review --base HEAD~$total_count 2>/dev/null || codex review --base HEAD~5
+            fi
             return 0
         fi
         
