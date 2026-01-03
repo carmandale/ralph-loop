@@ -416,7 +416,14 @@ cmd_done() {
         if [[ "$final_review" =~ ^[Yy] ]]; then
             echo ""
             if command -v codex &> /dev/null; then
-                codex review
+                # Review uncommitted changes, or recent commits if clean
+                if ! git diff --quiet || ! git diff --cached --quiet; then
+                    info "Reviewing uncommitted changes..."
+                    codex review --uncommitted
+                else
+                    info "Reviewing recent commits (last 5)..."
+                    codex review --base HEAD~5
+                fi
             else
                 warn "codex CLI not found."
             fi
