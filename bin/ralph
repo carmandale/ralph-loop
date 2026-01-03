@@ -402,14 +402,14 @@ do_commit() {
     local total="$2"
     local task_text="$3"
     
-    # Check if there are changes to commit
-    if git diff --quiet && git diff --cached --quiet; then
+    # Stage all changes first (includes untracked files)
+    git add -A
+    
+    # Check if there are changes to commit (after staging)
+    if git diff --cached --quiet; then
         warn "No changes to commit"
         return
     fi
-    
-    # Stage all changes
-    git add -A
     
     # Generate commit message
     local plan_title=$(head -1 "$(get_current_plan)" | sed 's/^# //' | sed 's/^Plan: //')
