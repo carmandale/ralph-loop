@@ -637,6 +637,131 @@ cmd_plan() {
     ${EDITOR:-vim} "$plan_file"
 }
 
+cmd_yolo() {
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}🚀 RALPH YOLO MODE - Full Auto, No Prompts${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "No active plan. Run 'ralph init' first."
+    
+    local plan_title=$(head -1 "$plan_file" | sed 's/^# //' | sed 's/^Plan: //')
+    info "Plan: $plan_title"
+    
+    local total=$(( $(count_tasks "$plan_file" "done") + $(count_tasks "$plan_file" "pending") ))
+    local remaining=$(count_tasks "$plan_file" "pending")
+    
+    echo ""
+    warn "This will run $remaining remaining tasks automatically."
+    warn "Pi will run non-interactively. Commits will be auto-created."
+    echo ""
+    read -p "Are you sure? Type 'yolo' to confirm: " confirm
+    [[ "$confirm" == "yolo" ]] || { info "Aborted."; return; }
+    
+    echo ""
+    info "Starting YOLO mode..."
+    echo ""
+    
+    # Get reminders for context
+    local reminders=$(get_reminders)
+    local build_cmd=$(get_build_command)
+    
+    while true; do
+        local next_task=$(get_next_task "$plan_file")
+        
+        # Check if done
+        if [[ -z "$next_task" ]]; then
+            echo ""
+            success "═══════════════════════════════════════════════════════════════"
+            success "🎉 YOLO COMPLETE - All tasks finished!"
+            success "═══════════════════════════════════════════════════════════════"
+            cmd_status
+            return 0
+        fi
+        
+        local task_text=$(echo "$next_task" | cut -d'|' -f3)
+        local line_num=$(echo "$next_task" | cut -d'|' -f2)
+        local done_count=$(count_tasks "$plan_file" "done")
+        local total_count=$((done_count + $(count_tasks "$plan_file" "pending")))
+        local task_num=$((done_count + 1))
+        
+        echo ""
+        echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}YOLO Task $task_num/$total_count:${NC} $task_text"
+        echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        
+        # Build context for Pi
+        local context="You are working on this plan in YOLO (non-interactive) mode.
+
+$(cat "$plan_file")
+
+═══════════════════════════════════════════════════════════════
+PROGRESS: $done_count of $total_count tasks complete
+═══════════════════════════════════════════════════════════════
+
+YOUR CURRENT TASK:
+→ $task_text
+
+CRITICAL YOLO RULES:
+1. Complete this ONE task only. Do NOT proceed to other tasks.
+2. Make the minimal changes needed. No refactoring.
+3. If you're uncertain, make a reasonable choice and note it.
+4. You are running non-interactively - no user input available.
+
+THINK before acting:
+- What files need to change?
+- What's the minimal edit?
+
+"
+        
+        # Add reminders if configured
+        if [[ -n "$reminders" ]]; then
+            context+="
+═══════════════════════════════════════════════════════════════
+PROJECT RULES (DO NOT VIOLATE):
+═══════════════════════════════════════════════════════════════
+$reminders
+═══════════════════════════════════════════════════════════════
+"
+        fi
+        
+        # Run Pi non-interactively
+        info "Running Pi (non-interactive)..."
+        if ! pi -p "$context"; then
+            echo ""
+            warn "Pi exited with error. Stopping YOLO mode."
+            warn "Run 'ralph next' to continue interactively."
+            return 1
+        fi
+        
+        # Build verification
+        if [[ -n "$build_cmd" ]]; then
+            echo ""
+            info "Build verification: $build_cmd"
+            if ! eval "$build_cmd"; then
+                echo ""
+                warn "Build failed. Stopping YOLO mode."
+                warn "Fix the build, then run 'ralph yolo' to continue."
+                return 1
+            fi
+            success "✓ Build passed"
+        fi
+        
+        # Mark complete
+        mark_task_done "$plan_file" "$line_num"
+        success "✓ Task marked complete"
+        
+        # Commit
+        do_commit "$task_num" "$total_count" "$task_text"
+        
+        # Brief pause to avoid hammering
+        sleep 1
+    done
+}
+
 cmd_review() {
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
@@ -710,6 +835,7 @@ ${BOLD}COMMANDS${NC}
     next            Show next task, launch Pi with context
     done            Verify build, commit, mark complete
     stuck           Get help (Oracle, code review, etc.)
+    yolo            🚀 Full auto mode - run all tasks non-interactively
     review          Run codex review on recent changes
     status          Show plan progress
     note "msg"      Add timestamped note to plan
@@ -753,6 +879,7 @@ main() {
         next)   cmd_next "$@" ;;
         done)   cmd_done "$@" ;;
         stuck)  cmd_stuck "$@" ;;
+        yolo)   cmd_yolo "$@" ;;
         review) cmd_review "$@" ;;
         status) cmd_status "$@" ;;
         note)   cmd_note "$@" ;;
