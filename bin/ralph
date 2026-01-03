@@ -358,7 +358,7 @@ cmd_done() {
             info "Running codex review..."
             echo ""
             if command -v codex &> /dev/null; then
-                codex review
+                codex review --uncommitted
             else
                 warn "codex CLI not found. Skipping review."
             fi
@@ -505,7 +505,12 @@ Please use the oracle skill to help me think through this problem. Load the skil
             info "Running codex review..."
             echo ""
             if command -v codex &> /dev/null; then
-                codex review
+                # Review uncommitted changes, or last 5 commits if nothing uncommitted
+                if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+                    codex review --uncommitted
+                else
+                    codex review --base HEAD~5
+                fi
             else
                 warn "codex CLI not found. Install it or run review manually."
             fi
