@@ -687,6 +687,25 @@ cmd_yolo() {
     info "Starting YOLO mode..."
     echo ""
     
+    # Initialize summary file
+    local summary_dir="$RALPH_DIR/summaries"
+    mkdir -p "$summary_dir"
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local summary_file="$summary_dir/yolo-$timestamp.md"
+    local pi_output_file=$(mktemp)
+    local start_time=$(date +%s)
+    
+    # Write summary header
+    cat > "$summary_file" << EOF
+# YOLO Summary: $plan_title
+
+**Started:** $(date '+%Y-%m-%d %H:%M:%S')
+**Plan:** $plan_file
+
+## Tasks Completed
+
+EOF
+    
     # Get reminders for context
     local reminders=$(get_reminders)
     local build_cmd=$(get_build_command)
@@ -696,18 +715,45 @@ cmd_yolo() {
         
         # Check if done
         if [[ -z "$next_task" ]]; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            local duration_min=$((duration / 60))
+            local duration_sec=$((duration % 60))
+            
             echo ""
             success "═══════════════════════════════════════════════════════════════"
             success "🎉 YOLO COMPLETE - All tasks finished!"
             success "═══════════════════════════════════════════════════════════════"
             cmd_status
             
+            # Finalize summary
+            cat >> "$summary_file" << EOF
+
+## Summary
+
+**Completed:** $(date '+%Y-%m-%d %H:%M:%S')
+**Duration:** ${duration_min}m ${duration_sec}s
+**Tasks completed:** $total
+
+## Review Checklist
+
+- [ ] Review commits: \`git log --oneline -$total\`
+- [ ] Run tests
+- [ ] Manual verification
+- [ ] Push when ready: \`git push\`
+EOF
+            
+            echo ""
+            success "📋 Summary saved to: $summary_file"
+            
             # Final codex review
             echo ""
             if command -v codex &> /dev/null; then
                 info "Running final codex review..."
-                codex review --base HEAD~$total_count 2>/dev/null || codex review --base HEAD~5
+                codex review --base HEAD~$total 2>/dev/null || codex review --base HEAD~5
             fi
+            
+            rm -f "$pi_output_file"
             return 0
         fi
         
@@ -758,14 +804,44 @@ $reminders
 "
         fi
         
-        # Run Pi non-interactively
+        # Run Pi non-interactively, capture output for summary
         info "Running Pi (non-interactive)..."
-        if ! pi -p "$context"; then
+        if ! pi -p "$context" 2>&1 | tee "$pi_output_file"; then
             echo ""
             warn "Pi exited with error. Stopping YOLO mode."
             warn "Run 'ralph next' to continue interactively."
+            # Write partial summary
+            echo "" >> "$summary_file"
+            echo "## ⚠️ YOLO Stopped (Pi Error)" >> "$summary_file"
+            echo "" >> "$summary_file"
+            echo "Stopped at task $task_num: $task_text" >> "$summary_file"
+            echo "" >> "$summary_file"
+            echo "**Summary saved to:** $summary_file" 
+            rm -f "$pi_output_file"
             return 1
         fi
+        
+        # Extract notes/decisions from Pi output for summary
+        local task_notes=$(grep -iE "(uncertain|assumption|note:|decision|chose|opted|went with|tradeoff)" "$pi_output_file" 2>/dev/null | head -10)
+        local files_changed=$(git diff --name-only 2>/dev/null | head -10)
+        
+        # Append to summary
+        echo "### Task $task_num: $task_text" >> "$summary_file"
+        echo "" >> "$summary_file"
+        if [[ -n "$files_changed" ]]; then
+            echo "**Files changed:**" >> "$summary_file"
+            echo '```' >> "$summary_file"
+            echo "$files_changed" >> "$summary_file"
+            echo '```' >> "$summary_file"
+        fi
+        if [[ -n "$task_notes" ]]; then
+            echo "" >> "$summary_file"
+            echo "**Notes/Decisions:**" >> "$summary_file"
+            echo "$task_notes" | while read -r line; do
+                echo "- $line" >> "$summary_file"
+            done
+        fi
+        echo "" >> "$summary_file"
         
         # Build verification
         if [[ -n "$build_cmd" ]]; then
@@ -775,6 +851,14 @@ $reminders
                 echo ""
                 warn "Build failed. Stopping YOLO mode."
                 warn "Fix the build, then run 'ralph yolo' to continue."
+                # Write partial summary
+                echo "" >> "$summary_file"
+                echo "## ⚠️ YOLO Stopped (Build Failed)" >> "$summary_file"
+                echo "" >> "$summary_file"
+                echo "Build failed after task $task_num: $task_text" >> "$summary_file"
+                echo "" >> "$summary_file"
+                echo "**Summary saved to:** $summary_file"
+                rm -f "$pi_output_file"
                 return 1
             fi
             success "✓ Build passed"
