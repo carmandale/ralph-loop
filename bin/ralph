@@ -613,21 +613,54 @@ cmd_review() {
         die "codex CLI not found. Install it to use code review."
     fi
     
-    # Show what will be reviewed
-    echo -e "${CYAN}Recent changes to review:${NC}"
-    git diff --stat HEAD~3 2>/dev/null || git diff --stat
-    echo ""
-    
-    read -p "Run codex review? [Y/n]: " confirm
-    confirm=${confirm:-y}
-    
-    if [[ "$confirm" =~ ^[Yy] ]]; then
-        info "Running codex review..."
-        echo ""
-        codex review
-    else
-        info "Review cancelled"
+    # Check for uncommitted changes
+    local has_uncommitted=false
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        has_uncommitted=true
     fi
+    
+    echo "What would you like to review?"
+    echo ""
+    if [[ "$has_uncommitted" == true ]]; then
+        echo "  1) Uncommitted changes (staged + unstaged)"
+    else
+        echo "  1) Uncommitted changes (none detected)"
+    fi
+    echo "  2) Changes since last N commits"
+    echo "  3) Changes against a branch (e.g., main)"
+    echo "  4) Cancel"
+    echo ""
+    read -p "Choice [1]: " review_choice
+    review_choice=${review_choice:-1}
+    
+    case "$review_choice" in
+        1)
+            if [[ "$has_uncommitted" == true ]]; then
+                info "Running codex review --uncommitted..."
+                echo ""
+                codex review --uncommitted
+            else
+                warn "No uncommitted changes to review"
+            fi
+            ;;
+        2)
+            read -p "How many commits back? [3]: " num_commits
+            num_commits=${num_commits:-3}
+            info "Running codex review --base HEAD~$num_commits..."
+            echo ""
+            codex review --base "HEAD~$num_commits"
+            ;;
+        3)
+            read -p "Base branch [main]: " base_branch
+            base_branch=${base_branch:-main}
+            info "Running codex review --base $base_branch..."
+            echo ""
+            codex review --base "$base_branch"
+            ;;
+        *)
+            info "Review cancelled"
+            ;;
+    esac
 }
 
 cmd_help() {
