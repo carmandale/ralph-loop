@@ -56,6 +56,13 @@ get_build_command() {
     fi
 }
 
+get_reminders() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # Extract multi-line reminders block between [reminders] and next section or EOF
+        awk '/^\[reminders\]/{flag=1; next} /^\[/{flag=0} flag' "$CONFIG_FILE" 2>/dev/null
+    fi
+}
+
 # Parse tasks from markdown, returns: status|line_number|task_text
 parse_tasks() {
     local plan_file="$1"
@@ -200,8 +207,23 @@ ALIGN: Is this a significant change (multiple files, new patterns)?
 ACT:   Only proceed after thinking and aligning.
        If uncertain about ANYTHING, ask. Don't guess.
 
+EOF
+
+    # Add project-specific reminders if configured
+    local reminders=$(get_reminders)
+    if [[ -n "$reminders" ]]; then
+        cat >> "$context_file" << EOF
+
+═══════════════════════════════════════════════════════════════
+PROJECT RULES (DO NOT VIOLATE):
+═══════════════════════════════════════════════════════════════
+$reminders
 ═══════════════════════════════════════════════════════════════
 EOF
+    fi
+
+    # Close the context
+    echo "═══════════════════════════════════════════════════════════════" >> "$context_file"
 
     echo -e "${CYAN}Context prepared. Launch Pi?${NC}"
     echo ""
