@@ -278,6 +278,9 @@ cmd_done() {
     
     local task_text=$(echo "$next_task" | cut -d'|' -f3)
     local line_num=$(echo "$next_task" | cut -d'|' -f2)
+    local done_count=$(count_tasks "$plan_file" "done")
+    local total_count=$((done_count + $(count_tasks "$plan_file" "pending")))
+    local task_num=$((done_count + 1))
     
     echo ""
     echo -e "${YELLOW}Completing task:${NC} $task_text"
@@ -301,9 +304,64 @@ cmd_done() {
         echo ""
     fi
     
-    # Mark task complete
-    mark_task_done "$plan_file" "$line_num"
-    success "✓ Task marked complete"
+    # Ask what to do next
+    echo -e "${CYAN}Build passed. What next?${NC}"
+    echo ""
+    echo "  1) Done + Commit - mark complete, commit changes (no push)"
+    echo "  2) Review first  - run codex review, then complete"
+    echo "  3) Done (no commit) - mark complete only"
+    echo "  4) Back to Pi    - not done yet, continue working"
+    echo ""
+    read -p "Choice [1]: " done_choice
+    done_choice=${done_choice:-1}
+    
+    case "$done_choice" in
+        1)
+            # Mark task complete
+            mark_task_done "$plan_file" "$line_num"
+            success "✓ Task marked complete"
+            
+            # Commit changes (no push)
+            do_commit "$task_num" "$total_count" "$task_text"
+            ;;
+        2)
+            # Run codex review first
+            echo ""
+            info "Running codex review..."
+            echo ""
+            if command -v codex &> /dev/null; then
+                codex review
+            else
+                warn "codex CLI not found. Skipping review."
+            fi
+            
+            echo ""
+            read -p "Proceed with completion? [Y/n]: " proceed
+            proceed=${proceed:-y}
+            if [[ "$proceed" =~ ^[Yy] ]]; then
+                mark_task_done "$plan_file" "$line_num"
+                success "✓ Task marked complete"
+                do_commit "$task_num" "$total_count" "$task_text"
+            else
+                info "Task not marked complete. Run 'ralph done' when ready."
+                return
+            fi
+            ;;
+        3)
+            # Mark complete without commit
+            mark_task_done "$plan_file" "$line_num"
+            success "✓ Task marked complete (no commit)"
+            ;;
+        4)
+            info "Continuing work. Run 'ralph done' when ready."
+            cmd_next
+            return
+            ;;
+        *)
+            info "Invalid choice. Run 'ralph done' when ready."
+            return
+            ;;
+    esac
     
     # Show progress
     echo ""
@@ -320,6 +378,51 @@ cmd_done() {
         else
             info "Run 'ralph next' when ready"
         fi
+    else
+        # Plan complete - offer final review
+        echo ""
+        echo -e "${GREEN}🎉 All tasks complete!${NC}"
+        echo ""
+        read -p "Run codex review on all changes? [Y/n]: " final_review
+        final_review=${final_review:-y}
+        if [[ "$final_review" =~ ^[Yy] ]]; then
+            echo ""
+            if command -v codex &> /dev/null; then
+                codex review
+            else
+                warn "codex CLI not found."
+            fi
+        fi
+    fi
+}
+
+# Commit helper - commits staged changes with task info
+do_commit() {
+    local task_num="$1"
+    local total="$2"
+    local task_text="$3"
+    
+    # Check if there are changes to commit
+    if git diff --quiet && git diff --cached --quiet; then
+        warn "No changes to commit"
+        return
+    fi
+    
+    # Stage all changes
+    git add -A
+    
+    # Generate commit message
+    local plan_title=$(head -1 "$(get_current_plan)" | sed 's/^# //' | sed 's/^Plan: //')
+    local commit_msg="ralph: Task $task_num/$total - $task_text
+
+Plan: $plan_title"
+    
+    # Commit (no push)
+    if git commit -m "$commit_msg"; then
+        success "✓ Changes committed (not pushed)"
+        echo -e "  ${CYAN}Commit:${NC} $(git log -1 --oneline)"
+    else
+        warn "Commit failed"
     fi
 }
 
@@ -499,6 +602,34 @@ cmd_plan() {
     ${EDITOR:-vim} "$plan_file"
 }
 
+cmd_review() {
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}RALPH - CODE REVIEW${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    if ! command -v codex &> /dev/null; then
+        die "codex CLI not found. Install it to use code review."
+    fi
+    
+    # Show what will be reviewed
+    echo -e "${CYAN}Recent changes to review:${NC}"
+    git diff --stat HEAD~3 2>/dev/null || git diff --stat
+    echo ""
+    
+    read -p "Run codex review? [Y/n]: " confirm
+    confirm=${confirm:-y}
+    
+    if [[ "$confirm" =~ ^[Yy] ]]; then
+        info "Running codex review..."
+        echo ""
+        codex review
+    else
+        info "Review cancelled"
+    fi
+}
+
 cmd_help() {
     cat << EOF
 ${BOLD}ralph${NC} - Keep your AI agent on track with structured loops
@@ -509,8 +640,9 @@ ${BOLD}USAGE${NC}
 ${BOLD}COMMANDS${NC}
     init "desc"     Create a new plan
     next            Show next task, launch Pi with context
-    done            Verify build, mark task complete
+    done            Verify build, commit, mark complete
     stuck           Get help (Oracle, code review, etc.)
+    review          Run codex review on recent changes
     status          Show plan progress
     note "msg"      Add timestamped note to plan
     plan            Open plan in editor
@@ -553,6 +685,7 @@ main() {
         next)   cmd_next "$@" ;;
         done)   cmd_done "$@" ;;
         stuck)  cmd_stuck "$@" ;;
+        review) cmd_review "$@" ;;
         status) cmd_status "$@" ;;
         note)   cmd_note "$@" ;;
         plan)   cmd_plan "$@" ;;
