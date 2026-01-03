@@ -769,6 +769,118 @@ $reminders
     done
 }
 
+cmd_log() {
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}RALPH - SESSION LOG${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    # Find Pi sessions directory for this project
+    # Pi encodes paths as: --path-component-component-- (/ becomes -, leading --, trailing --)
+    local cwd=$(pwd)
+    local encoded_path=$(echo "$cwd" | sed 's|/|-|g')
+    encoded_path="-${encoded_path}--"  # Results in --path-to-project--
+    local sessions_dir="$HOME/.pi/agent/sessions/$encoded_path"
+    
+    if [[ ! -d "$sessions_dir" ]]; then
+        warn "No Pi sessions found for this project"
+        echo "  Sessions dir: $sessions_dir"
+        return 1
+    fi
+    
+    # Helper to get session status
+    get_session_status() {
+        local session_file="$1"
+        local last_line=$(tail -1 "$session_file" 2>/dev/null)
+        local stop_reason=$(echo "$last_line" | grep -o '"stopReason":"[^"]*"' | cut -d'"' -f4)
+        local error_msg=$(echo "$last_line" | grep -o '"errorMessage":"[^"]*"' | cut -d'"' -f4)
+        
+        if [[ "$stop_reason" == "error" ]]; then
+            echo "❌ ${error_msg:-error}"
+        elif [[ "$stop_reason" == "endTurn" || "$stop_reason" == "stop" ]]; then
+            echo "✓"
+        elif [[ -n "$stop_reason" ]]; then
+            echo "• $stop_reason"
+        else
+            echo "?"
+        fi
+    }
+    
+    # Show recent sessions with status
+    echo -e "${CYAN}Recent sessions:${NC}"
+    echo ""
+    
+    # Store sessions in a temp file to handle spaces in paths
+    local tmp_sessions=$(mktemp)
+    ls -t "$sessions_dir"/*.jsonl 2>/dev/null | head -10 > "$tmp_sessions"
+    
+    local i=1
+    while IFS= read -r session; do
+        local name=$(basename "$session")
+        local timestamp=$(echo "$name" | cut -d'_' -f1 | sed 's/T/ /' | sed 's/-/:/3' | sed 's/-/:/4' | cut -c1-16)
+        local status=$(get_session_status "$session")
+        
+        if [[ $i -eq 1 ]]; then
+            echo -e "  ${BOLD}$i)${NC} $timestamp  $status  ${CYAN}← latest${NC}"
+        else
+            echo -e "  $i) $timestamp  $status"
+        fi
+        ((i++))
+    done < "$tmp_sessions"
+    
+    local num_sessions=$((i - 1))
+    
+    echo ""
+    echo -e "  0) Exit"
+    echo ""
+    read -p "View session details [0]: " choice
+    choice=${choice:-0}
+    
+    [[ "$choice" == "0" ]] && { rm -f "$tmp_sessions"; return 0; }
+    [[ "$choice" -lt 1 || "$choice" -gt $num_sessions ]] && { warn "Invalid choice"; rm -f "$tmp_sessions"; return 1; }
+    
+    local selected=$(sed -n "${choice}p" "$tmp_sessions")
+    rm -f "$tmp_sessions"
+    local selected_name=$(basename "$selected")
+    
+    echo ""
+    echo -e "${BOLD}─────────────────────────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}Session:${NC} $selected_name"
+    echo ""
+    
+    # Get detailed status
+    local last_line=$(tail -1 "$selected")
+    local stop_reason=$(echo "$last_line" | grep -o '"stopReason":"[^"]*"' | cut -d'"' -f4)
+    local error_msg=$(echo "$last_line" | grep -o '"errorMessage":"[^"]*"' | cut -d'"' -f4)
+    
+    if [[ "$stop_reason" == "error" ]]; then
+        echo -e "${RED}❌ Session ended with error${NC}"
+        echo ""
+        echo -e "${YELLOW}Error:${NC} ${error_msg:-Unknown error}"
+        echo ""
+        
+        # Show usage stats if available
+        local input_tokens=$(echo "$last_line" | grep -o '"input":[0-9]*' | head -1 | cut -d':' -f2)
+        local output_tokens=$(echo "$last_line" | grep -o '"output":[0-9]*' | head -1 | cut -d':' -f2)
+        
+        if [[ "$input_tokens" == "0" && "$output_tokens" == "0" ]]; then
+            echo -e "${CYAN}Diagnosis:${NC} API connection failed before processing (0 tokens)"
+            echo "  This is usually a transient network/API error."
+            echo "  Try again with 'ralph yolo' or 'ralph next'"
+        fi
+    elif [[ "$stop_reason" == "endTurn" || "$stop_reason" == "stop" ]]; then
+        echo -e "${GREEN}✓ Session completed normally${NC}"
+    elif [[ -n "$stop_reason" ]]; then
+        echo -e "${YELLOW}Session ended:${NC} $stop_reason"
+    else
+        echo -e "${YELLOW}Session status:${NC} in progress or unknown"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}Full path:${NC} $selected"
+}
+
 cmd_review() {
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
@@ -845,6 +957,7 @@ ${BOLD}COMMANDS${NC}
     yolo            🚀 Full auto mode - run all tasks non-interactively
     review          Run codex review on recent changes
     status          Show plan progress
+    log             Show last Pi session status (errors, etc.)
     note "msg"      Add timestamped note to plan
     plan            Open plan in editor
     help            Show this help
@@ -891,6 +1004,7 @@ main() {
         status) cmd_status "$@" ;;
         note)   cmd_note "$@" ;;
         plan)   cmd_plan "$@" ;;
+        log)    cmd_log "$@" ;;
         help|--help|-h) cmd_help ;;
         version|--version|-v) echo "ralph $VERSION" ;;
         *)      die "Unknown command: $cmd. Run 'ralph help' for usage." ;;
