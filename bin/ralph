@@ -243,6 +243,10 @@ EOF
             
             # Pi exited - auto-prompt for completion
             rm -f "$context_file"
+            
+            # Flush stdin to clear any ctrl-c artifacts
+            read -t 0.1 -n 10000 discard 2>/dev/null || true
+            
             echo ""
             echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
             echo -e "${CYAN}Pi session ended. What's next?${NC}"
@@ -326,7 +330,9 @@ cmd_done() {
         echo ""
     fi
     
-    # Ask what to do next
+    # Ask what to do next (flush stdin first to avoid ctrl-c artifacts)
+    read -t 0.1 -n 10000 discard 2>/dev/null || true
+    
     echo -e "${CYAN}Build passed. What next?${NC}"
     echo ""
     echo "  1) Done + Commit - mark complete, commit changes (no push)"
