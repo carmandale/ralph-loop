@@ -191,6 +191,37 @@ echo ".ralph/plans/YYYYMMDD-HHMMSS-feature-name.md" > .ralph/current
 - Tasks should be completable in one Pi session
 - Each task = one focused change, verifiable by build
 
+### CRITICAL: Task Writing Rules
+
+**The #1 cause of YOLO failures is incomplete task descriptions.**
+
+❌ BAD: "Create SyncConsolePanel view"
+✅ GOOD: "Create SyncConsolePanel view AND replace SyncProgressView with it in MainSplitView.swift"
+
+❌ BAD: "Add drag handle"  
+✅ GOOD: "Add drag handle to SyncConsolePanel that resizes the panel"
+
+**Every task that creates something must also integrate it:**
+- Creating a view? → Specify WHERE it gets used
+- Creating a model? → Specify WHAT consumes it
+- Adding a function? → Specify WHO calls it
+
+**Separate "create" from "integrate" when complex:**
+```
+- [ ] 4a. Create SyncConsolePanel view with drag handle and ETA header
+- [ ] 4b. Replace SyncProgressView with SyncConsolePanel in MainSplitView.swift
+- [ ] 4c. Verify: Panel slides up from bottom when sync starts
+```
+
+**Add verification tasks for UI changes:**
+```
+- [ ] Verify: New panel appears at bottom (not floating)
+- [ ] Verify: Drag handle resizes panel
+- [ ] Verify: ⌘⇧C toggles panel visibility
+```
+
+Build passing ≠ Feature working. Verification tasks catch this.
+
 ## Step 5: Ask Mode
 
 Present the choice:
