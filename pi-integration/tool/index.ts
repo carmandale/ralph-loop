@@ -296,6 +296,109 @@ const factory: CustomToolFactory = (pi) => {
         );
       },
     },
+
+    // ralph_list - List all plans in the project
+    {
+      name: "ralph_list",
+      label: "Ralph List Plans",
+      description: "List all ralph plans in the project with their progress. Use to see available plans before switching.",
+      parameters: Type.Object({}),
+
+      async execute(toolCallId, params, signal) {
+        const initialized = await isInitialized();
+        if (!initialized) {
+          return {
+            content: [{ type: "text", text: "No ralph project. Run 'ralph init \"description\"' to create one." }],
+            details: { action: "list", success: false, error: "not initialized" } as RalphDetails,
+          };
+        }
+
+        const result = await runRalph(["list"], signal);
+        if (result.code !== 0) {
+          return {
+            content: [{ type: "text", text: `Error: ${result.stderr || result.stdout}` }],
+            details: { action: "list", success: false, error: result.stderr } as RalphDetails,
+          };
+        }
+
+        // Count plans from output (lines with numbered plans)
+        const planCount = (result.stdout.match(/^\s*\d+\)/gm) || []).length;
+
+        return {
+          content: [{ type: "text", text: result.stdout }],
+          details: {
+            action: "list",
+            success: true,
+            taskCount: planCount,
+          } as RalphDetails,
+        };
+      },
+
+      renderResult(result, { expanded }, theme) {
+        const details = result.details as RalphDetails | undefined;
+        if (!details?.success) {
+          return new Text(theme.fg("error", details?.error || "Error"), 0, 0);
+        }
+        const text = theme.fg("success", "✓ ") + 
+          theme.fg("muted", `${details.taskCount} plan${details.taskCount === 1 ? "" : "s"} found`);
+        return new Text(text, 0, 0);
+      },
+    },
+
+    // ralph_switch - Switch to a different plan
+    {
+      name: "ralph_switch",
+      label: "Ralph Switch Plan",
+      description: "Switch to a different ralph plan by number (from ralph_list) or partial name match.",
+      parameters: Type.Object({
+        plan: Type.String({ description: "Plan number (e.g., '2') or partial name to match (e.g., 'auth')" }),
+      }),
+
+      async execute(toolCallId, params, signal) {
+        const { plan } = params as { plan: string };
+
+        const initialized = await isInitialized();
+        if (!initialized) {
+          return {
+            content: [{ type: "text", text: "No ralph project. Run 'ralph init \"description\"' to create one." }],
+            details: { action: "switch", success: false, error: "not initialized" } as RalphDetails,
+          };
+        }
+
+        const result = await runRalph(["switch", plan], signal);
+        if (result.code !== 0) {
+          return {
+            content: [{ type: "text", text: `Error: ${result.stderr || result.stdout}` }],
+            details: { action: "switch", success: false, error: result.stderr } as RalphDetails,
+          };
+        }
+
+        // Extract plan title from output
+        const titleMatch = result.stdout.match(/Switched to: (.+)/);
+        const planTitle = titleMatch ? titleMatch[1] : undefined;
+
+        return {
+          content: [{ type: "text", text: result.stdout }],
+          details: {
+            action: "switch",
+            success: true,
+            planFile: planTitle,
+          } as RalphDetails,
+        };
+      },
+
+      renderResult(result, { expanded }, theme) {
+        const details = result.details as RalphDetails | undefined;
+        if (!details?.success) {
+          return new Text(theme.fg("error", details?.error || "Error"), 0, 0);
+        }
+        let text = theme.fg("success", "✓ ") + theme.fg("muted", "Switched plan");
+        if (details.planFile) {
+          text += "\n" + theme.fg("dim", `  ${details.planFile}`);
+        }
+        return new Text(text, 0, 0);
+      },
+    },
   ];
 };
 

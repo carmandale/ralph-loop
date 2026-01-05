@@ -103,6 +103,48 @@ Progress: ████████░░░░ 4/7 (57%)
 
 ---
 
+## ralph list
+
+```bash
+ralph list
+# or
+ralph ls
+```
+
+Shows all plans in the project with progress:
+
+```
+═══════════════════════════════════════════════════════════════
+RALPH - ALL PLANS
+═══════════════════════════════════════════════════════════════
+
+  1) Add User Authentication  [4/7 (57%)]  ← CURRENT
+  2) API Rate Limiting  [0/5 (0%)]
+  3) Database Migration  [12/12 (100%)]  ✓ complete
+
+Use 'ralph switch <number>' to change active plan
+```
+
+---
+
+## ralph switch
+
+```bash
+ralph switch        # Interactive - shows list, prompts for number
+ralph switch 2      # Direct - switch to plan #2
+ralph switch auth   # Fuzzy - switch to plan containing "auth"
+```
+
+Switch between multiple plans in the same project:
+
+1. **By number** - Use plan number from `ralph list`
+2. **Interactive** - Run without args to see list and choose
+3. **By name** - Partial filename match
+
+After switching, shows the new plan's status.
+
+---
+
 ## ralph note
 
 ```bash

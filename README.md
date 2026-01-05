@@ -30,6 +30,8 @@ ralph done                              # Build, commit, next
 | `yolo` | Full auto, no prompts |
 | `review` | Run codex review |
 | `status` | Show progress |
+| `list` | Show all plans with progress |
+| `switch [n]` | Switch to different plan |
 | `note "msg"` | Add note to plan |
 
 ## The Loop
