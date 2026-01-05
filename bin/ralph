@@ -694,6 +694,7 @@ cmd_yolo() {
     local summary_file="$summary_dir/yolo-$timestamp.md"
     local pi_output_file=$(mktemp)
     local start_time=$(date +%s)
+    local tasks_completed=0  # Track tasks completed THIS session
     
     # Write summary header
     cat > "$summary_file" << EOF
@@ -733,11 +734,11 @@ EOF
 
 **Completed:** $(date '+%Y-%m-%d %H:%M:%S')
 **Duration:** ${duration_min}m ${duration_sec}s
-**Tasks completed:** $total
+**Tasks completed this session:** $tasks_completed
 
 ## Review Checklist
 
-- [ ] Review commits: \`git log --oneline -$total\`
+- [ ] Review commits: \`git log --oneline -$tasks_completed\`
 - [ ] Run tests
 - [ ] Manual verification
 - [ ] Push when ready: \`git push\`
@@ -748,9 +749,11 @@ EOF
             
             # Final codex review
             echo ""
-            if command -v codex &> /dev/null; then
-                info "Running final codex review..."
-                codex review --base HEAD~$total 2>/dev/null || codex review --base HEAD~5
+            if command -v codex &> /dev/null && [[ $tasks_completed -gt 0 ]]; then
+                info "Running final codex review on $tasks_completed commits..."
+                codex review --base "HEAD~$tasks_completed"
+            elif [[ $tasks_completed -eq 0 ]]; then
+                info "No tasks completed this session - skipping codex review"
             fi
             
             rm -f "$pi_output_file"
@@ -870,6 +873,7 @@ $reminders
         
         # Commit
         do_commit "$task_num" "$total_count" "$task_text"
+        ((tasks_completed++))
         
         # Brief pause to avoid hammering
         sleep 1
