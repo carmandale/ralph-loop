@@ -1,6 +1,6 @@
 ---
 name: ralph
-description: Create and run Ralph loops for structured AI-driven development. Triggered by "create a ralph loop for X" or "ralph plan for X". Uses interview to clarify requirements, creates phased task plans, and optionally runs in YOLO mode for autonomous execution.
+description: Create and run Ralph loops for structured AI-driven development. Triggered by "create a ralph loop for X" or "ralph plan for X". Uses interview to clarify requirements, expert review via rp-cli, creates phased task plans, and executes in YOLO mode.
 ---
 
 # Ralph Loop Skill
@@ -11,23 +11,31 @@ Create bulletproof development plans that execute reliably in YOLO mode.
 
 - "create a ralph loop for..."
 - "ralph plan for..."
-- "yolo this feature..."
 - "make a ralph loop and start with an interview"
+- "yolo this feature..."
 
 ## The Bulletproof Process
 
 ```
-1. RESEARCH    - Understand the codebase before asking questions
+1. RESEARCH      - Understand the codebase
        ↓
-2. INTERVIEW   - Gather requirements with specific, actionable questions
+2. INTERVIEW     - Gather requirements from user
        ↓
-3. DESIGN      - Define the architecture and file changes
+3. DESIGN        - Create architecture document
        ↓
-4. PLAN        - Write atomic, complete tasks with verification
+4. EXPERT REVIEW - rp-cli plan mode review of design
        ↓
-5. REVIEW      - Present plan to user for approval
+5. ORACLE        - (if complex) Deep architecture review
        ↓
-6. EXECUTE     - ralph yolo or ralph next
+6. CREATE PLAN   - Write atomic, complete tasks
+       ↓
+7. PLAN REVIEW   - rp-cli plan mode review of tasks
+       ↓
+8. FINALIZE      - User approval
+       ↓
+9. EXECUTE       - ralph yolo
+       ↓
+10. POST-REVIEW  - codex review of changes
 ```
 
 ---
@@ -62,8 +70,8 @@ cat path/to/existing/similar/feature.swift | head -100
 
 ### Research Output
 
-Document findings before interview:
-```
+Document findings:
+```markdown
 ## Research Findings
 
 **Existing patterns:**
@@ -167,14 +175,6 @@ Every interview MUST cover:
 }
 ```
 
-### Interview Rules
-
-1. **Include research context** - Show what you learned
-2. **Offer specific options** - Not vague "what do you want?"
-3. **Include recommendations** - Guide the user
-4. **Ask about acceptance** - How do we know it's done?
-5. **Allow freeform input** - For details you didn't anticipate
-
 ---
 
 ## Phase 3: DESIGN (Required)
@@ -188,7 +188,7 @@ Every interview MUST cover:
 
 ### Interview Summary
 - Scope: [answer]
-- Location: [answer]
+- Location: [answer]  
 - Behavior: [answer]
 - Edge cases: [answer]
 - Acceptance: [answer]
@@ -232,7 +232,85 @@ Every interview MUST cover:
 
 ---
 
-## Phase 4: PLAN (Critical)
+## Phase 4: EXPERT REVIEW (Required)
+
+**Use rp-cli plan mode to get expert review of the design.**
+
+### Select Context Files
+
+```bash
+# Select files relevant to the design
+rp-cli manage_selection '{
+  "op": "set",
+  "paths": [
+    "path/to/existing/similar.swift",
+    "path/to/where/integration/happens.swift"
+  ]
+}'
+```
+
+### Request Design Review
+
+```bash
+rp-cli chat_send '{
+  "mode": "plan",
+  "new_chat": true,
+  "chat_name": "Design Review: [Feature Name]",
+  "message": "Please review this design for a new feature.\n\n## Design\n[paste design document]\n\n## Questions\n1. Is this architecture sound?\n2. Am I missing any integration points?\n3. Are there existing patterns I should follow?\n4. Any potential issues or edge cases?"
+}'
+```
+
+### Process Review Feedback
+
+- Update design based on feedback
+- Note any architectural changes
+- If major issues found, return to Phase 3
+
+---
+
+## Phase 5: ORACLE (Complex Features Only)
+
+**For complex features, get deep architecture review from Oracle (GPT-5 Pro).**
+
+### When to Use Oracle
+
+- Multiple subsystems involved
+- New architectural patterns needed
+- Cross-cutting concerns (auth, sync, caching)
+- Integration with external services
+- Performance-critical paths
+
+### Oracle Query Template
+
+```
+I need architecture advice for: [feature name]
+
+## Context
+[Brief project description]
+[Current architecture]
+
+## What I'm Building
+[Feature description]
+[Current design]
+
+## Specific Questions
+1. [Architecture question]
+2. [Pattern question]
+3. [Integration question]
+
+## Constraints
+[Performance, compatibility, etc.]
+```
+
+### Process Oracle Response
+
+- Update design with Oracle recommendations
+- Document key decisions and rationale
+- If significant changes, re-run Phase 4 review
+
+---
+
+## Phase 6: CREATE PLAN (Critical)
 
 **Write tasks that are atomic, complete, and verifiable.**
 
@@ -242,7 +320,7 @@ Every task MUST have:
 
 1. **WHAT** - The specific change to make
 2. **WHERE** - The exact file(s) to modify
-3. **HOW** - Brief implementation approach
+3. **HOW** - Brief implementation approach (if not obvious)
 4. **VERIFY** - How to confirm it worked
 
 ### Task Writing Rules
@@ -267,37 +345,6 @@ Every task MUST have:
 ❌ BAD: "Add drag handle"
 ✅ GOOD: "Add drag handle to panel. VERIFY: Dragging handle resizes panel height"
 
-### Task Templates
-
-**For creating a new view:**
-```
-- [ ] Create [ViewName] in [path/to/file.swift]
-      - Structure: [brief description]
-      - VERIFY: File compiles, preview renders
-      
-- [ ] Integrate [ViewName] into [ParentView] in [path/to/parent.swift]
-      - Replace/add to: [specific location in parent]
-      - VERIFY: View appears in correct location when [trigger]
-```
-
-**For modifying behavior:**
-```
-- [ ] Update [function/property] in [file.swift]
-      - Change: [what changes]
-      - VERIFY: [how to test]
-```
-
-**For adding state:**
-```
-- [ ] Add [property] to [StateClass] in [file.swift]
-      - Type: [type]
-      - Default: [value]
-      
-- [ ] Wire [property] to UI in [View.swift]
-      - Binding/observation: [how]
-      - VERIFY: Changing state updates UI
-```
-
 ### Plan Structure
 
 ```markdown
@@ -311,8 +358,9 @@ Every task MUST have:
 - Location: [answer]
 - Behavior: [answer]
 
-## Design
-[Key architecture decisions from design phase]
+## Design Review Notes
+[Key feedback from rp-cli review]
+[Oracle recommendations if applicable]
 
 ## Tasks
 
@@ -344,13 +392,50 @@ Every task MUST have:
 
 ---
 
-## Phase 5: REVIEW (Required)
+## Phase 7: PLAN REVIEW (Required)
 
-**Present the plan to the user before execution.**
+**Use rp-cli plan mode to review the task list before execution.**
 
-### Review Checklist
+### Select Plan Context
 
-Before presenting, verify:
+```bash
+# Select files that will be modified
+rp-cli manage_selection '{
+  "op": "set", 
+  "paths": [
+    "path/to/file1.swift",
+    "path/to/file2.swift"
+  ]
+}'
+```
+
+### Request Plan Review
+
+```bash
+rp-cli chat_send '{
+  "mode": "plan",
+  "new_chat": true,
+  "chat_name": "Plan Review: [Feature Name]",
+  "message": "Please review this implementation plan.\n\n## Plan\n[paste full plan]\n\n## Review Checklist\n1. Does every CREATE task have a corresponding INTEGRATE task?\n2. Are all file paths correct and specific?\n3. Is each task atomic (one concern)?\n4. Does each task have a VERIFY step?\n5. Are there any missing tasks or integration points?\n6. Will this plan work in YOLO mode (non-interactive)?"
+}'
+```
+
+### Process Review Feedback
+
+- Fix any issues identified
+- Add missing tasks
+- Clarify ambiguous descriptions
+- Ensure all integration points covered
+
+---
+
+## Phase 8: FINALIZE (Required)
+
+**Get user approval before execution.**
+
+### Finalization Checklist
+
+Before presenting to user, verify:
 
 - [ ] Every "create" task has a corresponding "integrate" task
 - [ ] Every task names specific files
@@ -358,64 +443,107 @@ Before presenting, verify:
 - [ ] Phase 4 has explicit verification tasks
 - [ ] Success criteria match interview answers
 - [ ] Files Changed table is complete
+- [ ] Design review feedback incorporated
+- [ ] Plan review feedback incorporated
 
-### Review Prompt
+### Present to User
 
-```
-## Plan Review: [Feature Name]
-
-I've created a plan with [N] tasks across [M] phases.
+```markdown
+## Plan Ready: [Feature Name]
 
 **Summary:**
-- Phase 1: [description] ([n] tasks)
-- Phase 2: [description] ([n] tasks)
-- Phase 3: [description] ([n] tasks)
-- Phase 4: Verification ([n] tasks)
+- [N] tasks across [M] phases
+- [X] files to create, [Y] files to modify
 
-**Files to create:** [list]
-**Files to modify:** [list]
+**Reviews completed:**
+- ✅ Design review (rp-cli plan mode)
+- ✅ Plan review (rp-cli plan mode)
+- [✅ Oracle review (if applicable)]
 
-**Key decisions from interview:**
-- [decision 1]
-- [decision 2]
+**Key decisions:**
+- [Decision 1 from interview/reviews]
+- [Decision 2 from interview/reviews]
 
 **How to proceed:**
-1. **Review plan** - I'll show you the full plan
-2. **Edit plan** - Open in editor to adjust
-3. **YOLO** - Run all tasks autonomously
-4. **Interactive** - Work task by task
+1. **Review full plan** - See all tasks
+2. **Edit plan** - Make changes before running
+3. **Launch YOLO** - Execute all tasks automatically
+4. **Interactive mode** - Work task by task
 
-Which would you like?
+Ready to launch?
 ```
 
 ---
 
-## Phase 6: EXECUTE
+## Phase 9: EXECUTE
 
-### YOLO Mode (Recommended for well-planned work)
+### Launch YOLO Mode
 
 ```bash
+cd /path/to/project
 ralph yolo
 # Type 'yolo' to confirm
 # Runs all tasks non-interactively
 # Auto-commits each task
-# Runs codex review at end
+# Codex review runs automatically at end
 ```
 
-### Interactive Mode
+### Monitor Execution
 
-```bash
-ralph next
-# Work on one task at a time
-# User confirms each completion
-```
+- Watch for build failures
+- Note any tasks that seem to struggle
+- Be ready to intervene if needed
 
 ### On Failure
 
 ```bash
 ralph status    # See where we stopped
-ralph next      # Fix interactively
+ralph next      # Fix the issue interactively
 ralph yolo      # Continue from current task
+```
+
+---
+
+## Phase 10: POST-REVIEW (Required)
+
+**After YOLO completes, review the changes.**
+
+### Automatic Codex Review
+
+Ralph automatically runs codex review after YOLO completes:
+```
+Running final codex review on N commits (abc123..def456)...
+```
+
+If codex review doesn't run automatically:
+```bash
+codex review --base <start-commit>
+```
+
+### Manual Verification
+
+For UI changes, verify visually:
+```bash
+gj run ms  # Or appropriate run command
+# Check that feature works as expected
+```
+
+### rp-cli Post-Implementation Review (Optional)
+
+For complex changes, request a post-implementation review:
+
+```bash
+rp-cli manage_selection '{
+  "op": "set",
+  "paths": ["files/that/changed.swift"]
+}'
+
+rp-cli chat_send '{
+  "mode": "plan",
+  "new_chat": true,
+  "chat_name": "Post-Review: [Feature Name]",
+  "message": "Please review these changes for:\n1. Code quality issues\n2. Missing error handling\n3. Performance concerns\n4. Consistency with project patterns"
+}'
 ```
 
 ---
@@ -426,109 +554,146 @@ ralph yolo      # Continue from current task
 |--------------|--------------|
 | Skipping research | Questions are vague, plan is wrong |
 | Skipping interview | Assumptions lead to rework |
+| Skipping design review | Architecture issues caught too late |
+| Skipping plan review | Missing tasks, broken YOLO |
 | "Create X" without integration | Component built but never used |
 | No file paths in tasks | Agent guesses wrong location |
 | No verification tasks | Feature broken but marked done |
 | Huge tasks | Too much scope, partial completion |
 | No success criteria | No way to know if done |
+| Skipping post-review | Bugs ship to production |
+
+---
+
+## rp-cli Quick Reference
+
+### Setup Selection
+```bash
+rp-cli manage_selection '{"op": "set", "paths": ["file1.swift", "file2.swift"]}'
+rp-cli manage_selection '{"op": "get", "view": "files"}'
+```
+
+### Plan Mode Review
+```bash
+rp-cli chat_send '{
+  "mode": "plan",
+  "new_chat": true,
+  "chat_name": "Review: Topic",
+  "message": "Review request..."
+}'
+```
+
+### Continue Conversation
+```bash
+rp-cli chat_send '{
+  "mode": "plan",
+  "new_chat": false,
+  "message": "Follow-up question..."
+}'
+```
+
+### List Available Models
+```bash
+rp-cli list_models
+```
 
 ---
 
 ## Example: Complete Flow
 
-**User:** "Create a ralph loop for adding a refresh button to the toolbar"
+**User:** "Create a ralph loop for Xcode-style bottom console panel"
 
 ### 1. Research
 ```bash
-rg -l "toolbar" --type swift
-# Found: MediaOrganizationView.swift has toolbarContent
-cat "path/to/MediaOrganizationView.swift" | grep -A20 "toolbarContent"
-# Found: Uses ToolbarItemGroup pattern
+rg -l "SyncProgress" --type swift
+# Found: SyncProgressView.swift (current implementation)
+# Found: MainSplitView.swift (where it's used)
+
+cat "SharedUI/Common/SyncProgressView.swift" | head -50
+# Current: floating card overlay
+
+cat "Features/MediaOrganization/Views/MainSplitView.swift" | grep -A10 "SyncProgress"
+# Integration point identified
 ```
 
 ### 2. Interview
 ```json
 {
-  "title": "Ralph Plan: Toolbar Refresh Button",
+  "title": "Ralph Plan: Xcode-style Console Panel",
+  "description": "Currently using floating card. You want Xcode-style bottom panel.",
   "questions": [
-    {
-      "id": "location",
-      "type": "single", 
-      "question": "Where should the refresh button appear?",
-      "options": ["Left toolbar group (with sidebar toggle)", "Right toolbar group (with other actions)", "New dedicated group"],
-      "context": "Currently MediaOrganizationView.swift has left nav group and right action group"
-    },
-    {
-      "id": "behavior",
-      "type": "single",
-      "question": "What should refresh do?",
-      "options": ["Reload file list only", "Reload + re-scan for new files", "Full library rebuild"]
-    },
-    {
-      "id": "feedback",
-      "type": "single",
-      "question": "How should refresh show progress?",
-      "options": ["Spinning icon", "Progress overlay", "Toast notification", "No feedback needed"]
-    }
+    {"id": "style", "question": "Confirm: Bottom slide-up panel like Xcode console?"},
+    {"id": "resize", "question": "Should panel be resizable via drag?"},
+    {"id": "collapse", "question": "Should panel collapse to header-only?"},
+    {"id": "shortcut", "question": "Keyboard shortcut? (suggest ⌘⇧C)"},
+    {"id": "acceptance", "question": "How will you verify it works?"}
   ]
 }
 ```
 
 ### 3. Design
 ```markdown
-## Design: Toolbar Refresh Button
+## Design: Xcode-style Console Panel
 
-### Interview Summary
-- Location: Right toolbar group
-- Behavior: Reload + re-scan
-- Feedback: Spinning icon during refresh
+### Architecture
+- CREATE: SyncConsolePanel.swift (new component)
+- MODIFY: MainSplitView.swift (replace SyncProgressView)
+- MODIFY: AppState.swift (add showSyncConsole toggle)
 
-### Files to modify
-| File | Changes |
-|------|---------|
-| MediaOrganizationView.swift | Add refresh button to toolbarContent |
-| MediaLibraryState.swift | Add isRefreshing property |
+### Integration
+- SyncConsolePanel replaces SyncProgressView in StatusFooter
+- Same callbacks (onCancel, onPause, etc.)
+- AppState.showSyncConsole controls visibility
 ```
 
-### 4. Plan
-```markdown
-# Plan: Toolbar Refresh Button
+### 4. Expert Review (rp-cli)
+```bash
+rp-cli manage_selection '{"op":"set","paths":["SharedUI/Common/SyncProgressView.swift","Features/MediaOrganization/Views/MainSplitView.swift"]}'
 
+rp-cli chat_send '{"mode":"plan","new_chat":true,"chat_name":"Design Review: Console Panel","message":"Review this design..."}'
+```
+
+### 5. Create Plan
+```markdown
 ## Tasks
 
-### Phase 1: State
-- [ ] 1.1 Add `isRefreshing: Bool` to MediaLibraryState.swift
-      - Default: false
-      - VERIFY: Property exists, compiles
+### Phase 1: Create Component
+- [ ] 1.1 Create SyncConsolePanel.swift in SharedUI/Common/
+      VERIFY: File compiles, preview renders
 
-### Phase 2: UI
-- [ ] 2.1 Add refresh button to toolbarContent in MediaOrganizationView.swift
-      - Location: ToolbarItemGroup(placement: .automatic) 
-      - Icon: arrow.clockwise (spinning when isRefreshing)
-      - Action: Call state.refreshLibrary()
-      - VERIFY: Button appears in toolbar
+### Phase 2: Integration  
+- [ ] 2.1 Replace SyncProgressView with SyncConsolePanel in MainSplitView.swift StatusFooter
+      VERIFY: New panel appears at bottom when sync starts
 
-### Phase 3: Behavior
-- [ ] 3.1 Update refreshLibrary() in MediaLibraryState.swift
-      - Set isRefreshing = true at start
-      - Set isRefreshing = false at end
-      - VERIFY: Icon spins during refresh
+### Phase 3: Features
+- [ ] 3.1 Add drag handle for resizing
+      VERIFY: Dragging changes panel height
+- [ ] 3.2 Add collapse/expand toggle
+      VERIFY: Panel collapses to header only
 
 ### Phase 4: Verification
-- [ ] 4.1 VERIFY: Button appears in right toolbar group
-- [ ] 4.2 VERIFY: Clicking refreshes file list
-- [ ] 4.3 VERIFY: Icon spins during refresh
-
-## Success Criteria
-- [ ] Refresh button visible in toolbar
-- [ ] Clicking triggers file rescan
-- [ ] Visual feedback during operation
+- [ ] 4.1 VERIFY: Panel slides up from bottom (not floating)
+- [ ] 4.2 VERIFY: ⌘⇧C toggles visibility
+- [ ] 4.3 VERIFY: Drag handle resizes panel
 ```
 
-### 5. Review & Execute
+### 6. Plan Review (rp-cli)
+```bash
+rp-cli chat_send '{"mode":"plan","new_chat":true,"message":"Review this plan for YOLO execution..."}'
 ```
-Plan created with 6 tasks across 4 phases.
-Ready to proceed with YOLO mode?
+
+### 7. Finalize & Execute
+```bash
+ralph yolo
+# All tasks execute
+# Codex review runs automatically
+```
+
+### 8. Post-Review
+```bash
+# Verify visually
+gj run ms
+# Check panel appears at bottom, drag works, etc.
 ```
 
 ---
@@ -536,8 +701,9 @@ Ready to proceed with YOLO mode?
 ## Key Principles
 
 1. **Research first** - Understand before asking
-2. **Interview always** - Never assume requirements
+2. **Interview always** - Never assume requirements  
 3. **Design before tasks** - Architecture drives implementation
-4. **Atomic + Complete** - One thing, fully integrated
-5. **Verify everything** - Build passing ≠ feature working
-6. **Review before execute** - Catch issues before YOLO
+4. **Review twice** - Design review + Plan review via rp-cli
+5. **Atomic + Complete** - One thing, fully integrated
+6. **Verify everything** - Build passing ≠ feature working
+7. **Post-review always** - Codex + manual verification
