@@ -694,7 +694,7 @@ cmd_yolo() {
     local summary_file="$summary_dir/yolo-$timestamp.md"
     local pi_output_file=$(mktemp)
     local start_time=$(date +%s)
-    local tasks_completed=0  # Track tasks completed THIS session
+    local start_commit=$(git rev-parse HEAD 2>/dev/null || echo "")  # Anchor commit before any work
     
     # Write summary header
     cat > "$summary_file" << EOF
@@ -702,6 +702,7 @@ cmd_yolo() {
 
 **Started:** $(date '+%Y-%m-%d %H:%M:%S')
 **Plan:** $plan_file
+**Starting commit:** $start_commit
 
 ## Tasks Completed
 
@@ -720,6 +721,13 @@ EOF
             local duration=$((end_time - start_time))
             local duration_min=$((duration / 60))
             local duration_sec=$((duration % 60))
+            local end_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+            
+            # Calculate actual commit count from git history (bulletproof)
+            local commit_count=0
+            if [[ -n "$start_commit" && -n "$end_commit" && "$start_commit" != "$end_commit" ]]; then
+                commit_count=$(git rev-list --count "$start_commit".."$end_commit" 2>/dev/null || echo "0")
+            fi
             
             echo ""
             success "═══════════════════════════════════════════════════════════════"
@@ -734,11 +742,11 @@ EOF
 
 **Completed:** $(date '+%Y-%m-%d %H:%M:%S')
 **Duration:** ${duration_min}m ${duration_sec}s
-**Tasks completed this session:** $tasks_completed
+**Commits this session:** $commit_count ($start_commit..$end_commit)
 
 ## Review Checklist
 
-- [ ] Review commits: \`git log --oneline -$tasks_completed\`
+- [ ] Review commits: \`git log --oneline $start_commit..$end_commit\`
 - [ ] Run tests
 - [ ] Manual verification
 - [ ] Push when ready: \`git push\`
@@ -747,13 +755,13 @@ EOF
             echo ""
             success "📋 Summary saved to: $summary_file"
             
-            # Final codex review
+            # Final codex review using commit range (accurate)
             echo ""
-            if command -v codex &> /dev/null && [[ $tasks_completed -gt 0 ]]; then
-                info "Running final codex review on $tasks_completed commits..."
-                codex review --base "HEAD~$tasks_completed"
-            elif [[ $tasks_completed -eq 0 ]]; then
-                info "No tasks completed this session - skipping codex review"
+            if command -v codex &> /dev/null && [[ $commit_count -gt 0 ]]; then
+                info "Running final codex review on $commit_count commits ($start_commit..$end_commit)..."
+                codex review --base "$start_commit"
+            elif [[ $commit_count -eq 0 ]]; then
+                info "No commits this session - skipping codex review"
             fi
             
             rm -f "$pi_output_file"
@@ -873,7 +881,6 @@ $reminders
         
         # Commit
         do_commit "$task_num" "$total_count" "$task_text"
-        ((tasks_completed++))
         
         # Brief pause to avoid hammering
         sleep 1
