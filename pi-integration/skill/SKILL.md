@@ -323,6 +323,18 @@ Every task MUST have:
 3. **HOW** - Brief implementation approach (if not obvious)
 4. **VERIFY** - How to confirm it worked
 
+### Task Sizing (Critical)
+
+**All tasks should be similar size** - the LLM struggles with inconsistent sizing.
+
+| Task Size | Time Estimate | Example |
+|-----------|---------------|---------|
+| Too small | < 2 min | "Add import statement" |
+| ✅ Right | 5-15 min | "Create SyncConsolePanel view with basic layout" |
+| Too large | > 30 min | "Implement entire sync feature with all UI" |
+
+**Why this matters:** Large tasks get "swallowed up" - the LLM runs out of context window before finishing, producing incomplete or buggy code. If a task would take a human > 30 minutes, split it.
+
 ### Task Writing Rules
 
 #### Rule 1: Atomic = One Concern
@@ -330,17 +342,22 @@ Every task MUST have:
 ❌ BAD: "Add sync panel with drag handle and animations"
 ✅ GOOD: Three separate tasks
 
-#### Rule 2: Complete = Create + Integrate
+#### Rule 2: Consistent Size
+
+❌ BAD: Mix of tiny ("add import") and huge ("implement feature") tasks
+✅ GOOD: All tasks take roughly 5-15 minutes of LLM work
+
+#### Rule 3: Complete = Create + Integrate
 
 ❌ BAD: "Create SyncConsolePanel view"
 ✅ GOOD: "Create SyncConsolePanel view in SharedUI/Common/ AND replace SyncProgressView with it in MainSplitView.swift"
 
-#### Rule 3: Specific Files Named
+#### Rule 4: Specific Files Named
 
 ❌ BAD: "Add the button to the toolbar"
 ✅ GOOD: "Add refresh button to toolbar in MediaOrganizationView.swift toolbarContent"
 
-#### Rule 4: Verification Included
+#### Rule 5: Verification Included
 
 ❌ BAD: "Add drag handle"
 ✅ GOOD: "Add drag handle to panel. VERIFY: Dragging handle resizes panel height"
@@ -560,8 +577,10 @@ rp-cli chat_send '{
 | No file paths in tasks | Agent guesses wrong location |
 | No verification tasks | Feature broken but marked done |
 | Huge tasks | Too much scope, partial completion |
+| Inconsistent task sizes | Large tasks "swallowed up", small tasks waste iterations |
 | No success criteria | No way to know if done |
 | Skipping post-review | Bugs ship to production |
+| Not appending to progress.txt | Lost learnings, repeated mistakes |
 
 ---
 

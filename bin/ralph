@@ -63,6 +63,50 @@ get_reminders() {
     fi
 }
 
+# Get all verify commands (build + optional typecheck, test, lint)
+get_verify_commands() {
+    local commands=()
+    
+    # Primary build command
+    local build_cmd=$(get_build_command)
+    [[ -n "$build_cmd" ]] && commands+=("build:$build_cmd")
+    
+    # Additional verify commands from config
+    if [[ -f "$CONFIG_FILE" ]]; then
+        local typecheck=$(grep "^typecheck=" "$CONFIG_FILE" | cut -d= -f2-)
+        local test_cmd=$(grep "^test=" "$CONFIG_FILE" | cut -d= -f2-)
+        local lint=$(grep "^lint=" "$CONFIG_FILE" | cut -d= -f2-)
+        
+        [[ -n "$typecheck" ]] && commands+=("typecheck:$typecheck")
+        [[ -n "$test_cmd" ]] && commands+=("test:$test_cmd")
+        [[ -n "$lint" ]] && commands+=("lint:$lint")
+    fi
+    
+    # Return newline-separated
+    printf '%s\n' "${commands[@]}"
+}
+
+# Run all verification commands, return 0 if all pass
+run_verify_commands() {
+    local all_passed=true
+    
+    while IFS=':' read -r name cmd; do
+        [[ -z "$name" ]] && continue
+        
+        info "Verifying ($name): $cmd"
+        if eval "$cmd"; then
+            success "  ✓ $name passed"
+        else
+            echo ""
+            warn "  ✗ $name failed"
+            all_passed=false
+            break  # Stop on first failure
+        fi
+    done < <(get_verify_commands)
+    
+    [[ "$all_passed" == true ]]
+}
+
 # Parse tasks from markdown, returns: status|line_number|task_text
 parse_tasks() {
     local plan_file="$1"
@@ -149,6 +193,20 @@ cmd_init() {
 - $(date +%Y-%m-%d): Plan created
 
 EOF
+
+    # Create progress.txt (append-only LLM memory)
+    local progress_file="$RALPH_DIR/progress.txt"
+    if [[ ! -f "$progress_file" ]]; then
+        cat > "$progress_file" << EOF
+# Ralph Progress Log
+# This file is your memory across context windows.
+# APPEND your learnings here after each task - never overwrite.
+# Format: [date] [task] - [what you learned]
+
+$(date '+%Y-%m-%d %H:%M') - Plan created: $description
+
+EOF
+    fi
     
     # Set as current plan
     echo "$plan_file" > "$CURRENT_FILE"
@@ -158,9 +216,27 @@ EOF
         local build_cmd=$(get_build_command)
         cat > "$CONFIG_FILE" << EOF
 # Ralph configuration
+#
+# Verification commands (all optional, run in order)
 # build=npm run build
+# typecheck=npm run typecheck
+# test=npm test
+# lint=npm run lint
+
+[reminders]
+# Project-specific rules injected into every task prompt
+# Example:
+# ⚠️ Use gj tools, not xcodebuild
+# 📅 Xcode 26, January 2026
 EOF
-        [[ -n "$build_cmd" ]] && echo "build=$build_cmd" >> "$CONFIG_FILE"
+        [[ -n "$build_cmd" ]] && {
+            # Insert build command after the comments
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s|# build=npm run build|build=$build_cmd|" "$CONFIG_FILE"
+            else
+                sed -i "s|# build=npm run build|build=$build_cmd|" "$CONFIG_FILE"
+            fi
+        }
     fi
     
     success "✓ Created plan: $plan_file"
@@ -195,6 +271,13 @@ cmd_next() {
     echo -e "  ${BOLD}$task_text${NC}"
     echo ""
     
+    # Read progress file if it exists
+    local progress_content=""
+    local progress_file="$RALPH_DIR/progress.txt"
+    if [[ -f "$progress_file" ]]; then
+        progress_content=$(cat "$progress_file")
+    fi
+
     # Generate context for Pi
     local context_file=$(mktemp)
     cat > "$context_file" << EOF
@@ -224,6 +307,19 @@ ALIGN: Is this a significant change (multiple files, new patterns)?
 
 ACT:   Only proceed after thinking and aligning.
        If uncertain about ANYTHING, ask. Don't guess.
+
+MEMORY (your notes from previous tasks):
+═══════════════════════════════════════════════════════════════
+$progress_content
+═══════════════════════════════════════════════════════════════
+
+AFTER COMPLETING THIS TASK:
+APPEND a brief note to .ralph/progress.txt with:
+- What you did
+- Any decisions or assumptions you made
+- Gotchas for future tasks
+Format: [date] [task summary] - [learnings]
+Do NOT overwrite the file - APPEND ONLY.
 
 EOF
 
@@ -330,21 +426,23 @@ cmd_done() {
     echo -e "${YELLOW}Completing task:${NC} $task_text"
     echo ""
     
-    # Build verification gate ⭐
-    local build_cmd=$(get_build_command)
-    if [[ -n "$build_cmd" ]]; then
-        info "Running build verification: $build_cmd"
+    # Verification gate ⭐ (build + typecheck + test + lint)
+    local has_verify=$(get_verify_commands | head -1)
+    if [[ -n "$has_verify" ]]; then
+        info "Running verification..."
         echo ""
-        if eval "$build_cmd"; then
-            success "✓ Build passed"
+        if run_verify_commands; then
+            echo ""
+            success "✓ All verifications passed"
         else
             echo ""
-            die "Build failed. Fix the build before marking task done.\n\nRun 'ralph stuck' if you need help."
+            die "Verification failed. Fix the issue before marking task done.\n\nRun 'ralph stuck' if you need help."
         fi
         echo ""
     else
-        warn "No build command configured. Skipping build verification."
+        warn "No verification commands configured. Skipping."
         echo "  Tip: Add 'build=your-command' to .ralph/config"
+        echo "  Optional: typecheck=, test=, lint="
         echo ""
     fi
     
@@ -621,6 +719,112 @@ cmd_status() {
     echo ""
 }
 
+cmd_list() {
+    ensure_init
+    
+    echo ""
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}RALPH - ALL PLANS${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    local current_plan=""
+    [[ -f "$CURRENT_FILE" ]] && current_plan=$(cat "$CURRENT_FILE")
+    
+    local plans=($(ls -t "$PLANS_DIR"/*.md 2>/dev/null))
+    
+    if [[ ${#plans[@]} -eq 0 ]]; then
+        warn "No plans found"
+        return 0
+    fi
+    
+    local i=1
+    for plan_file in "${plans[@]}"; do
+        local title=$(head -1 "$plan_file" | sed 's/^# //' | sed 's/^Plan: //')
+        local done_count=$(count_tasks "$plan_file" "done")
+        local pending_count=$(count_tasks "$plan_file" "pending")
+        local total=$((done_count + pending_count))
+        
+        # Progress indicator
+        local progress=""
+        if [[ $total -gt 0 ]]; then
+            local percent=$((done_count * 100 / total))
+            if [[ $percent -eq 100 ]]; then
+                progress="${GREEN}✓ complete${NC}"
+            else
+                progress="$done_count/$total (${percent}%)"
+            fi
+        else
+            progress="${YELLOW}no tasks${NC}"
+        fi
+        
+        # Check if current
+        if [[ "$PLANS_DIR/$(basename "$plan_file")" == "$current_plan" || "$plan_file" == "$current_plan" ]]; then
+            echo -e "  ${BOLD}$i)${NC} ${CYAN}$title${NC}  [$progress]  ${CYAN}← CURRENT${NC}"
+        else
+            echo -e "  $i) $title  [$progress]"
+        fi
+        
+        ((i++))
+    done
+    
+    echo ""
+    echo -e "${CYAN}Use 'ralph switch <number>' to change active plan${NC}"
+    echo ""
+}
+
+cmd_switch() {
+    ensure_init
+    
+    local target="${1:-}"
+    
+    # If no argument, show list and prompt
+    if [[ -z "$target" ]]; then
+        cmd_list
+        read -p "Switch to plan number: " target
+        [[ -z "$target" ]] && { info "Cancelled"; return 0; }
+    fi
+    
+    local plans=($(ls -t "$PLANS_DIR"/*.md 2>/dev/null))
+    
+    if [[ ${#plans[@]} -eq 0 ]]; then
+        die "No plans found"
+    fi
+    
+    # Handle numeric selection
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        if [[ "$target" -lt 1 || "$target" -gt ${#plans[@]} ]]; then
+            die "Invalid plan number. Use 1-${#plans[@]}"
+        fi
+        local selected="${plans[$((target-1))]}"
+        local title=$(head -1 "$selected" | sed 's/^# //' | sed 's/^Plan: //')
+        
+        echo "$selected" > "$CURRENT_FILE"
+        success "✓ Switched to: $title"
+        echo ""
+        cmd_status
+    else
+        # Handle filename/path
+        local found=""
+        for plan_file in "${plans[@]}"; do
+            if [[ "$(basename "$plan_file")" == "$target" || "$plan_file" == *"$target"* ]]; then
+                found="$plan_file"
+                break
+            fi
+        done
+        
+        if [[ -n "$found" ]]; then
+            local title=$(head -1 "$found" | sed 's/^# //' | sed 's/^Plan: //')
+            echo "$found" > "$CURRENT_FILE"
+            success "✓ Switched to: $title"
+            echo ""
+            cmd_status
+        else
+            die "Plan not found: $target"
+        fi
+    fi
+}
+
 cmd_note() {
     local note_text="${1:-}"
     [[ -n "$note_text" ]] || { read -p "Note: " note_text; }
@@ -780,6 +984,13 @@ EOF
         echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
         echo ""
         
+        # Read progress file for memory
+        local progress_content=""
+        local progress_file="$RALPH_DIR/progress.txt"
+        if [[ -f "$progress_file" ]]; then
+            progress_content=$(cat "$progress_file")
+        fi
+
         # Build context for Pi
         local context="You are working on this plan in YOLO (non-interactive) mode.
 
@@ -801,6 +1012,18 @@ CRITICAL YOLO RULES:
 THINK before acting:
 - What files need to change?
 - What's the minimal edit?
+
+MEMORY (your notes from previous tasks):
+═══════════════════════════════════════════════════════════════
+$progress_content
+═══════════════════════════════════════════════════════════════
+
+AFTER COMPLETING THIS TASK:
+APPEND a brief note to .ralph/progress.txt with:
+- What you did
+- Any decisions or assumptions you made
+Format: [date] [task summary] - [learnings]
+Do NOT overwrite - APPEND ONLY. This is your memory across tasks.
 
 "
         
@@ -854,25 +1077,26 @@ $reminders
         fi
         echo "" >> "$summary_file"
         
-        # Build verification
-        if [[ -n "$build_cmd" ]]; then
+        # Verification (build + typecheck + test + lint)
+        local has_verify=$(get_verify_commands | head -1)
+        if [[ -n "$has_verify" ]]; then
             echo ""
-            info "Build verification: $build_cmd"
-            if ! eval "$build_cmd"; then
+            info "Running verification..."
+            if ! run_verify_commands; then
                 echo ""
-                warn "Build failed. Stopping YOLO mode."
-                warn "Fix the build, then run 'ralph yolo' to continue."
+                warn "Verification failed. Stopping YOLO mode."
+                warn "Fix the issue, then run 'ralph yolo' to continue."
                 # Write partial summary
                 echo "" >> "$summary_file"
-                echo "## ⚠️ YOLO Stopped (Build Failed)" >> "$summary_file"
+                echo "## ⚠️ YOLO Stopped (Verification Failed)" >> "$summary_file"
                 echo "" >> "$summary_file"
-                echo "Build failed after task $task_num: $task_text" >> "$summary_file"
+                echo "Verification failed after task $task_num: $task_text" >> "$summary_file"
                 echo "" >> "$summary_file"
                 echo "**Summary saved to:** $summary_file"
                 rm -f "$pi_output_file"
                 return 1
             fi
-            success "✓ Build passed"
+            success "✓ All verifications passed"
         fi
         
         # Mark complete
@@ -1057,6 +1281,8 @@ ${BOLD}COMMANDS${NC}
     yolo            🚀 Full auto mode - run all tasks non-interactively
     review          Run codex review on recent changes
     status          Show plan progress
+    list            Show all plans with progress
+    switch [n]      Switch to a different plan
     log             Show last Pi session status (errors, etc.)
     note "msg"      Add timestamped note to plan
     plan            Open plan in editor
@@ -1102,6 +1328,8 @@ main() {
         yolo)   cmd_yolo "$@" ;;
         review) cmd_review "$@" ;;
         status) cmd_status "$@" ;;
+        list|ls) cmd_list "$@" ;;
+        switch) cmd_switch "$@" ;;
         note)   cmd_note "$@" ;;
         plan)   cmd_plan "$@" ;;
         log)    cmd_log "$@" ;;

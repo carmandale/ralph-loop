@@ -50,14 +50,27 @@ Repeat until plan complete
 
 `.ralph/config`:
 ```ini
+# Verification commands (run in order, all optional)
 build=gj build ms
+typecheck=npm run typecheck
+test=npm test
+lint=npm run lint
 
 [reminders]
 ⚠️ Use gj tools, not xcodebuild
 📅 Xcode 26, January 2026
 ```
 
-Reminders appear in every Pi prompt under "PROJECT RULES".
+- **Verification commands** run after each task (build → typecheck → test → lint)
+- **Reminders** appear in every Pi prompt under "PROJECT RULES"
+
+## Progress Memory
+
+`.ralph/progress.txt` is your LLM's memory across context windows:
+- Created automatically on `ralph init`
+- LLM appends learnings after each task
+- Read at start of each task for continuity
+- Never overwritten, only appended
 
 ## YOLO Mode
 
