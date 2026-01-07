@@ -151,6 +151,40 @@ get_session_status() {
     fi
 }
 
+# Get source file extensions pattern from config (or sensible defaults)
+get_source_extensions() {
+    if [[ -f "$CONFIG_FILE" ]] && grep -q "^source_extensions=" "$CONFIG_FILE"; then
+        grep "^source_extensions=" "$CONFIG_FILE" | cut -d= -f2-
+    else
+        # Default: common source code extensions
+        echo "swift|ts|tsx|js|jsx|py|rs|go|c|cpp|h|hpp|java|kt|rb|sh|bash|zsh"
+    fi
+}
+
+# Check if any source code files changed (not just docs/config)
+# Returns 0 (true) if source code changed, 1 (false) if only non-source files
+has_source_changes() {
+    local extensions=$(get_source_extensions)
+    local pattern="\.(${extensions})$"
+    
+    # Check both staged and unstaged changes
+    local source_files=$(git diff --name-only 2>/dev/null | grep -E "$pattern" | head -1)
+    local staged_source=$(git diff --cached --name-only 2>/dev/null | grep -E "$pattern" | head -1)
+    
+    [[ -n "$source_files" || -n "$staged_source" ]]
+}
+
+# Check if there are ANY changes (source or docs)
+has_any_changes() {
+    ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null
+}
+
+# Get list of changed files for display
+get_changed_files_summary() {
+    local all_changes=$(git diff --name-only 2>/dev/null; git diff --cached --name-only 2>/dev/null)
+    echo "$all_changes" | sort -u | head -10
+}
+
 mark_task_done() {
     local plan_file="$1"
     local line_num="$2"
@@ -222,6 +256,11 @@ EOF
 # typecheck=npm run typecheck
 # test=npm test
 # lint=npm run lint
+
+# Source file extensions (for change-aware build/commit)
+# Only files matching these extensions trigger builds
+# Default: swift|ts|tsx|js|jsx|py|rs|go|c|cpp|h|hpp|java|kt|rb|sh|bash|zsh
+# source_extensions=swift|ts|tsx|js|jsx|py
 
 [reminders]
 # Project-specific rules injected into every task prompt
@@ -1077,11 +1116,27 @@ $reminders
         fi
         echo "" >> "$summary_file"
         
-        # Verification (build + typecheck + test + lint)
+        # ═══════════════════════════════════════════════════════════════
+        # CHANGE-AWARE VERIFICATION & COMMIT (fixes noisy commit problem)
+        # Only build when source code changes, only commit when meaningful
+        # ═══════════════════════════════════════════════════════════════
+        
         local has_verify=$(get_verify_commands | head -1)
-        if [[ -n "$has_verify" ]]; then
+        local source_changed=false
+        local any_changes=false
+        
+        # Detect what actually changed
+        if has_source_changes; then
+            source_changed=true
+            any_changes=true
+        elif has_any_changes; then
+            any_changes=true
+        fi
+        
+        # Only run build if SOURCE CODE changed (not just docs/config)
+        if [[ "$source_changed" == true && -n "$has_verify" ]]; then
             echo ""
-            info "Running verification..."
+            info "Source code changed - running verification..."
             if ! run_verify_commands; then
                 echo ""
                 warn "Verification failed. Stopping YOLO mode."
@@ -1097,14 +1152,24 @@ $reminders
                 return 1
             fi
             success "✓ All verifications passed"
+        elif [[ "$any_changes" == true && -z "$has_verify" ]]; then
+            info "Changes detected (no build command configured)"
+        elif [[ "$any_changes" == true ]]; then
+            info "Non-source changes only - skipping build"
+        else
+            info "No changes detected - skipping build"
         fi
         
-        # Mark complete
+        # Mark complete (always - task was attempted)
         mark_task_done "$plan_file" "$line_num"
         success "✓ Task marked complete"
         
-        # Commit
-        do_commit "$task_num" "$total_count" "$task_text"
+        # Only commit if there are ACTUAL changes
+        if [[ "$any_changes" == true ]]; then
+            do_commit "$task_num" "$total_count" "$task_text"
+        else
+            info "No changes to commit"
+        fi
         
         # Brief pause to avoid hammering
         sleep 1
