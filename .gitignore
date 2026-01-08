@@ -1,5 +1,7 @@
 # Ralph working directory (each project has its own)
 .ralph/
+.ralph/manifests/
+.ralph/active-session
 
 # OS files
 .DS_Store

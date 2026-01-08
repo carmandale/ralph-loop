@@ -23,7 +23,7 @@ Current change-aware logic (`ff93d7f`) only checks IF changes exist, not WHO mad
 3. **Zero agent burden** - Agent doesn't need to remember or report files
 4. **Bulletproof** - Works automatically via tool interception, not self-reporting
 
-## Solution: Pi-Agent Hook + Per-Plan Manifests
+## Solution: Pi-Agent Hook + Per-Plan/Task/Session Manifests
 
 ### Architecture
 
@@ -34,13 +34,14 @@ Current change-aware logic (`ff93d7f`) only checks IF changes exist, not WHO mad
 │  ┌─────────────┐     ┌──────────────────────────────────────┐  │
 │  │ edit tool   │────▶│ ralph-file-tracker.ts (hook)         │  │
 │  │ write tool  │     │                                      │  │
-│  └─────────────┘     │ 1. Read RALPH_PLAN env var           │  │
-│                      │ 2. Append path to plan's manifest    │  │
+│  └─────────────┘     │ 1. Read RALPH_MANIFEST env var       │  │
+│                      │ 2. Append path to session manifest   │  │
 │                      └──────────────────────────────────────┘  │
 │                                     │                          │
 │                                     ▼                          │
 │                      ┌──────────────────────────────────────┐  │
-│                      │ .ralph/manifests/<plan-name>.txt     │  │
+│                      │ .ralph/manifests/<plan>/task-<n>/    │  │
+│                      │   <session>.txt                      │  │
 │                      │                                      │  │
 │                      │ src/FileA.swift                      │  │
 │                      │ src/FileB.swift                      │  │
@@ -50,10 +51,10 @@ Current change-aware logic (`ff93d7f`) only checks IF changes exist, not WHO mad
 ┌─────────────────────────────────────────────────────────────────┐
 │ bin/ralph (commit phase)                                        │
 │                                                                 │
-│ 1. Read manifest for current plan                               │
+│ 1. Read manifest for current task/session                       │
 │ 2. git add only those files                                     │
 │ 3. git commit                                                   │
-│ 4. Clear manifest for next task                                 │
+│ 4. Clear manifest after commit                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -69,42 +70,47 @@ export default function (pi: HookAPI) {
     // Only track edit and write tools
     if (event.toolName !== "edit" && event.toolName !== "write") return;
     
-    // Get plan name from env (set by ralph) or fall back to current file
-    const planName = process.env.RALPH_PLAN || getPlanFromCurrentFile(ctx.cwd);
-    if (!planName) return;  // Not in a ralph loop
-    
-    // Ensure manifests directory exists
-    const manifestDir = path.join(ctx.cwd, ".ralph", "manifests");
-    if (!fs.existsSync(manifestDir)) {
-      fs.mkdirSync(manifestDir, { recursive: true });
-    }
-    
-    // Append file path to manifest
+    if (process.env.RALPH_TRACKING !== "1") return;
+    const manifestPath = process.env.RALPH_MANIFEST;
+    const repoRoot = process.env.RALPH_ROOT;
+    if (!manifestPath || !repoRoot) return;
+
+    const manifestDir = path.dirname(manifestPath);
+    fs.mkdirSync(manifestDir, { recursive: true });
+
     const filePath = event.input.path as string;
-    const manifestPath = path.join(manifestDir, `${planName}.txt`);
-    fs.appendFileSync(manifestPath, filePath + "\n");
+    const relPath = normalizeToRepoRelative(repoRoot, filePath, ctx.cwd);
+    if (!relPath) return;
+    fs.appendFileSync(manifestPath, relPath + "\n");
   });
 }
 
-function getPlanFromCurrentFile(cwd: string): string | null {
-  const currentFile = path.join(cwd, ".ralph", "current");
-  if (!fs.existsSync(currentFile)) return null;
-  
-  const planPath = fs.readFileSync(currentFile, "utf-8").trim();
-  // Extract plan name from path like ".ralph/plans/my-plan.md"
-  const basename = path.basename(planPath, ".md");
-  return basename;
+function normalizeToRepoRelative(repoRoot: string, rawPath: string, cwd: string): string | null {
+  const abs = path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
+  const normalizedRoot = path.resolve(repoRoot);
+  const normalizedPath = path.resolve(abs);
+  if (!normalizedPath.startsWith(normalizedRoot + path.sep)) return null;
+  return path.relative(normalizedRoot, normalizedPath);
 }
 ```
 
-### Component 2: Environment Variable in `bin/ralph`
+Hook contract (no fallback):
+- Only track when `RALPH_TRACKING=1`
+- Requires `RALPH_MANIFEST` (full path) and `RALPH_ROOT`
+- Stores repo-root-relative paths, one per line
+
+### Component 2: Environment Variables in `bin/ralph`
 
 Before each task execution:
 
 ```bash
-# In yolo mode task loop, before invoking agent
-plan_name=$(basename "$(get_current_plan)" .md)
-export RALPH_PLAN="$plan_name"
+# Before invoking agent
+export RALPH_TRACKING=1
+export RALPH_ROOT="$(git rev-parse --show-toplevel)"
+export RALPH_PLAN="$(basename "$(get_current_plan)" .md)"
+export RALPH_TASK_NUM="$task_num"
+export RALPH_SESSION="$(uuidgen)"
+export RALPH_MANIFEST="$RALPH_ROOT/.ralph/manifests/$RALPH_PLAN/task-$RALPH_TASK_NUM/$RALPH_SESSION.txt"
 ```
 
 ### Component 3: Modified Commit Logic in `bin/ralph`
@@ -117,8 +123,7 @@ do_commit() {
     local total_count="$2"
     local task_text="$3"
     
-    local plan_name=$(basename "$(get_current_plan)" .md)
-    local manifest_file="$RALPH_DIR/manifests/${plan_name}.txt"
+    local manifest_file="$(get_manifest_file_for_task "$task_num")"
     
     # Check if manifest exists and has content
     if [[ ! -f "$manifest_file" ]] || [[ ! -s "$manifest_file" ]]; then
@@ -127,11 +132,11 @@ do_commit() {
     fi
     
     # Stage only files from manifest (deduped)
+    git reset
     local staged_count=0
     while IFS= read -r file; do
-        if [[ -n "$file" && -f "$file" ]]; then
-            git add "$file" 2>/dev/null && ((staged_count++))
-        fi
+        [[ -z "$file" ]] && continue
+        git add -A -- "$file" 2>/dev/null && ((staged_count++))
     done < <(sort -u "$manifest_file")
     
     if [[ $staged_count -eq 0 ]]; then
@@ -140,6 +145,11 @@ do_commit() {
         return 0
     fi
     
+    if git diff --cached --quiet; then
+        info "Nothing to commit (tracked files unchanged)"
+        return 0
+    fi
+
     # Commit staged files
     local msg="Task $task_num/$total_count: $task_text"
     if git commit -m "$msg" 2>/dev/null; then
@@ -148,7 +158,7 @@ do_commit() {
         info "Nothing to commit (files unchanged)"
     fi
     
-    # Clear manifest for next task
+    # Clear manifest after successful commit
     rm -f "$manifest_file"
 }
 ```
@@ -163,10 +173,11 @@ do_commit() {
 │   ├── phase-1-setup.md
 │   ├── phase-2-features.md
 │   └── phase-3-polish.md
+├── active-session             # plan|task|session|manifest (text)
 └── manifests/                 # NEW
-    ├── phase-1-setup.txt      # Files touched while this plan active
-    ├── phase-2-features.txt
-    └── phase-3-polish.txt
+    └── phase-1-setup/
+        └── task-1/
+            └── <session>.txt
 ```
 
 ## Behavior Matrix
@@ -177,6 +188,7 @@ do_commit() {
 | Task is no-op (verification) | Empty | Skips commit |
 | Agent 2 edits FileX (no ralph) | Not in manifest | Ignored |
 | Agent 2 edits FileX (different plan) | In different manifest | Ignored |
+| Two agents on same task | Different sessions | No collision |
 | bash creates file (edge case) | Not tracked | Not committed |
 
 ## Edge Cases
@@ -191,24 +203,24 @@ If agent does `bash echo "x" > file.txt`, the hook won't catch it. This is accep
 ### Plan Switch Mid-Task
 
 If user switches plans while a task is running:
-- Environment variable `RALPH_PLAN` is set at task START
-- Hook writes to the correct manifest based on env var
+- Environment variables are set at task START
+- Hook writes to the session manifest defined by `RALPH_MANIFEST`
 - Even if `.ralph/current` changes, tracking stays correct
 
-### Concurrent Plans (Same Directory)
+### Concurrent Tasks (Same Directory)
 
-Two agents running different plans simultaneously:
-- Each sets its own `RALPH_PLAN` env var
-- Each writes to its own manifest
-- No collision
+Two agents running the same plan/task simultaneously:
+- Each sets its own `RALPH_SESSION` and `RALPH_MANIFEST`
+- Manifests never collide
 
 ## Implementation Plan
 
 1. **Create hook** - `~/.pi/agent/hooks/ralph-file-tracker.ts` (or project-local)
-2. **Add env var export** - In `bin/ralph` yolo mode task loop
-3. **Replace commit logic** - Use manifest-based commit in `do_commit()`
-4. **Add manifests to .gitignore** - `.ralph/manifests/`
-5. **Test scenarios** - Single agent, multi-agent, plan switching
+2. **Add env var export** - In `bin/ralph` task launch
+3. **Track active session** - `.ralph/active-session` for continue runs
+4. **Replace commit logic** - Use manifest-based commit in `do_commit()`
+5. **Add manifests to .gitignore** - `.ralph/manifests/`
+6. **Test scenarios** - Single agent, multi-agent, plan switching
 
 ## Open Questions
 
@@ -220,3 +232,14 @@ Two agents running different plans simultaneously:
 
 3. What about `read` tool? Track files read for context?
    - **Recommendation:** No, only track writes
+
+## Verification Notes
+
+Manual scenarios run in a temporary repo using a stub `pi` command that wrote
+to `RALPH_MANIFEST` (hook execution not verified against a live Pi session):
+
+- Single-agent task committed only the tracked file.
+- No-op task produced no commit.
+- Foreign (untracked) change remained uncommitted.
+- YOLO multi-task produced one commit per task (plus init commit).
+- Deletion staged correctly (`git show --name-status` showed `D`).

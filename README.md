@@ -9,6 +9,23 @@ git clone https://github.com/carmandale/ralph-loop
 cd ralph-loop && ./install.sh
 ```
 
+## Pi Hook (File Tracking)
+
+ralph uses a Pi hook to track edits per task.
+
+```bash
+./install.sh
+# Manual: cp pi-integration/hook/ralph-file-tracker.ts ~/.pi/agent/hooks/
+```
+
+Verify tracking:
+
+```bash
+ralph tracked
+```
+
+Note: the hook is shipped as `.ts`. If your Pi setup requires `.js`, compile and place the `.js` file in `~/.pi/agent/hooks/`.
+
 ## Quick Start
 
 ```bash

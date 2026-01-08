@@ -133,6 +133,134 @@ get_current_task_line() {
     get_next_task "$plan_file" | cut -d'|' -f2
 }
 
+get_plan_name() {
+    basename "$(get_current_plan)" .md
+}
+
+get_repo_root() {
+    git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
+get_active_session_file() {
+    echo "$(get_repo_root)/$RALPH_DIR/active-session"
+}
+
+get_active_session_for_task() {
+    local plan_name="$1"
+    local task_num="$2"
+    local active_file=$(get_active_session_file)
+    [[ -f "$active_file" ]] || return 1
+
+    local active_plan=""
+    local active_task=""
+    local active_session=""
+    local active_manifest=""
+    IFS='|' read -r active_plan active_task active_session active_manifest < "$active_file"
+
+    if [[ "$active_plan" == "$plan_name" && "$active_task" == "$task_num" && -n "$active_session" && -n "$active_manifest" ]]; then
+        echo "$active_session|$active_manifest"
+        return 0
+    fi
+
+    return 1
+}
+
+set_active_session() {
+    local plan_name="$1"
+    local task_num="$2"
+    local session_id="$3"
+    local manifest_path="$4"
+    local active_file=$(get_active_session_file)
+    echo "$plan_name|$task_num|$session_id|$manifest_path" > "$active_file"
+}
+
+clear_active_session() {
+    local active_file=$(get_active_session_file)
+    rm -f "$active_file"
+}
+
+generate_session_id() {
+    if command -v uuidgen &> /dev/null; then
+        uuidgen
+    else
+        echo "$(date +%s)-$$"
+    fi
+}
+
+get_manifest_dir() {
+    local plan_name=$(get_plan_name)
+    echo "$(get_repo_root)/$RALPH_DIR/manifests/$plan_name"
+}
+
+get_manifest_task_dir() {
+    local task_num="$1"
+    echo "$(get_manifest_dir)/task-$task_num"
+}
+
+get_manifest_file_for_task() {
+    local task_num="$1"
+    local plan_name=$(get_plan_name)
+    local session_info
+
+    if session_info=$(get_active_session_for_task "$plan_name" "$task_num"); then
+        echo "${session_info#*|}"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_manifest_dir() {
+    local task_num="$1"
+    local manifest_dir=$(get_manifest_task_dir "$task_num")
+    mkdir -p "$manifest_dir"
+}
+
+start_tracking_session() {
+    local task_num="$1"
+    local force_new="${2:-false}"
+    local plan_name=$(get_plan_name)
+    local session_info
+
+    if [[ "$force_new" != "true" ]] && session_info=$(get_active_session_for_task "$plan_name" "$task_num"); then
+        echo "$session_info"
+        return 0
+    fi
+
+    local session_id=$(generate_session_id)
+    local manifest_dir=$(get_manifest_task_dir "$task_num")
+    mkdir -p "$manifest_dir"
+    local manifest_path="$manifest_dir/$session_id.txt"
+    : > "$manifest_path"
+    set_active_session "$plan_name" "$task_num" "$session_id" "$manifest_path"
+    echo "$session_id|$manifest_path"
+}
+
+clear_manifest_for_task() {
+    local task_num="$1"
+    local plan_name=$(get_plan_name)
+    local active_file=$(get_active_session_file)
+    [[ -f "$active_file" ]] || return 0
+
+    local active_plan=""
+    local active_task=""
+    local active_session=""
+    local active_manifest=""
+    IFS='|' read -r active_plan active_task active_session active_manifest < "$active_file"
+
+    if [[ "$active_plan" == "$plan_name" && "$active_task" == "$task_num" ]]; then
+        [[ -n "$active_manifest" ]] && rm -f "$active_manifest"
+        rm -f "$active_file"
+    fi
+}
+
+get_tracked_files_for_task() {
+    local task_num="$1"
+    local manifest_file=$(get_manifest_file_for_task "$task_num")
+    [[ -n "$manifest_file" && -f "$manifest_file" ]] || return 1
+    sort -u "$manifest_file"
+}
+
 # Helper to get Pi session status from a session file
 get_session_status() {
     local session_file="$1"
@@ -177,6 +305,34 @@ has_source_changes() {
 # Check if there are ANY changes (source or docs)
 has_any_changes() {
     ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null
+}
+
+# Check if tracked files have ANY changes for this task
+tracked_has_any_changes() {
+    local task_num="$1"
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        if [[ -n "$(git status --porcelain -- "$file" 2>/dev/null)" ]]; then
+            return 0
+        fi
+    done < <(get_tracked_files_for_task "$task_num")
+    return 1
+}
+
+# Check if tracked files have SOURCE changes for this task
+tracked_has_source_changes() {
+    local task_num="$1"
+    local extensions=$(get_source_extensions)
+    local pattern="\.(${extensions})$"
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        if [[ "$file" =~ $pattern ]]; then
+            if [[ -n "$(git status --porcelain -- "$file" 2>/dev/null)" ]]; then
+                return 0
+            fi
+        fi
+    done < <(get_tracked_files_for_task "$task_num")
+    return 1
 }
 
 # Get list of changed files for display
@@ -300,6 +456,7 @@ cmd_next() {
     local task_text=$(echo "$next_task" | cut -d'|' -f3)
     local done_count=$(count_tasks "$plan_file" "done")
     local total_count=$((done_count + $(count_tasks "$plan_file" "pending")))
+    local task_num=$((done_count + 1))
     
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
@@ -391,7 +548,18 @@ EOF
         1)
             info "Launching pi..."
             echo ""
+            local plan_name=$(get_plan_name)
+            local repo_root=$(get_repo_root)
+            local session_info=$(start_tracking_session "$task_num")
+            local tracking_session="${session_info%%|*}"
+            local tracking_manifest="${session_info#*|}"
             # Launch pi with the context as initial prompt
+            RALPH_TRACKING=1 \
+            RALPH_ROOT="$repo_root" \
+            RALPH_PLAN="$plan_name" \
+            RALPH_TASK_NUM="$task_num" \
+            RALPH_SESSION="$tracking_session" \
+            RALPH_MANIFEST="$tracking_manifest" \
             pi --prompt "$(cat "$context_file")"
             
             # Pi exited - auto-prompt for completion
@@ -505,7 +673,9 @@ cmd_done() {
             success "✓ Task marked complete"
             
             # Commit changes (no push)
-            do_commit "$task_num" "$total_count" "$task_text"
+            if do_commit "$task_num" "$total_count" "$task_text"; then
+                clear_manifest_for_task "$task_num"
+            fi
             ;;
         2)
             # Run codex review first
@@ -524,7 +694,9 @@ cmd_done() {
             if [[ "$proceed" =~ ^[Yy] ]]; then
                 mark_task_done "$plan_file" "$line_num"
                 success "✓ Task marked complete"
-                do_commit "$task_num" "$total_count" "$task_text"
+                if do_commit "$task_num" "$total_count" "$task_text"; then
+                    clear_manifest_for_task "$task_num"
+                fi
             else
                 info "Task not marked complete. Run 'ralph done' when ready."
                 return
@@ -534,6 +706,7 @@ cmd_done() {
             # Mark complete without commit
             mark_task_done "$plan_file" "$line_num"
             success "✓ Task marked complete (no commit)"
+            clear_manifest_for_task "$task_num"
             ;;
         4)
             info "Continuing work. Run 'ralph done' when ready."
@@ -591,28 +764,46 @@ do_commit() {
     local task_num="$1"
     local total="$2"
     local task_text="$3"
-    
-    # Stage all changes first (includes untracked files)
-    git add -A
-    
+
+    local manifest_file=$(get_manifest_file_for_task "$task_num")
+    if [[ -z "$manifest_file" || ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        warn "No tracked files for this task"
+        return 0
+    fi
+
+    # Clear any pre-staged changes to avoid leaking unrelated files
+    git reset
+
+    # Stage only files from manifest (deduped)
+    local staged_count=0
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        git add -A -- "$file" 2>/dev/null && ((staged_count++))
+    done < <(get_tracked_files_for_task "$task_num")
+
     # Check if there are changes to commit (after staging)
     if git diff --cached --quiet; then
         warn "No changes to commit"
-        return
+        return 0
     fi
-    
+
     # Generate commit message
     local plan_title=$(head -1 "$(get_current_plan)" | sed 's/^# //' | sed 's/^Plan: //')
     local commit_msg="ralph: Task $task_num/$total - $task_text
 
 Plan: $plan_title"
-    
+
     # Commit (no push)
     if git commit -m "$commit_msg"; then
         success "✓ Changes committed (not pushed)"
         echo -e "  ${CYAN}Commit:${NC} $(git log -1 --oneline)"
+        if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+            warn "Working tree still dirty after commit"
+        fi
+        return 0
     else
         warn "Commit failed"
+        return 1
     fi
 }
 
@@ -648,7 +839,20 @@ cmd_stuck() {
                     task_info="Current task: $(echo "$next_task" | cut -d'|' -f3)"
                 fi
             fi
+            local done_count=$(count_tasks "$plan_file" "done")
+            local task_num=$((done_count + 1))
+            local plan_name=$(get_plan_name)
+            local repo_root=$(get_repo_root)
+            local session_info=$(start_tracking_session "$task_num")
+            local tracking_session="${session_info%%|*}"
+            local tracking_manifest="${session_info#*|}"
             # Launch pi and tell it to consult Oracle
+            RALPH_TRACKING=1 \
+            RALPH_ROOT="$repo_root" \
+            RALPH_PLAN="$plan_name" \
+            RALPH_TASK_NUM="$task_num" \
+            RALPH_SESSION="$tracking_session" \
+            RALPH_MANIFEST="$tracking_manifest" \
             pi --prompt "I'm stuck and need to consult the Oracle for help.
 
 $task_info
@@ -914,6 +1118,8 @@ cmd_yolo() {
     [[ -f "$plan_file" ]] || die "No active plan. Run 'ralph init' first."
     
     local plan_title=$(head -1 "$plan_file" | sed 's/^# //' | sed 's/^Plan: //')
+    local plan_name=$(get_plan_name)
+    local repo_root=$(get_repo_root)
     info "Plan: $plan_title"
     
     local total=$(( $(count_tasks "$plan_file" "done") + $(count_tasks "$plan_file" "pending") ))
@@ -1077,9 +1283,19 @@ $reminders
 "
         fi
         
+        local session_info=$(start_tracking_session "$task_num" "true")
+        local tracking_session="${session_info%%|*}"
+        local tracking_manifest="${session_info#*|}"
+
         # Run Pi non-interactively, capture output for summary
         info "Running Pi (non-interactive)..."
-        if ! pi -p "$context" 2>&1 | tee "$pi_output_file"; then
+        if ! RALPH_TRACKING=1 \
+            RALPH_ROOT="$repo_root" \
+            RALPH_PLAN="$plan_name" \
+            RALPH_TASK_NUM="$task_num" \
+            RALPH_SESSION="$tracking_session" \
+            RALPH_MANIFEST="$tracking_manifest" \
+            pi -p "$context" 2>&1 | tee "$pi_output_file"; then
             echo ""
             warn "Pi exited with error. Stopping YOLO mode."
             warn "Run 'ralph next' to continue interactively."
@@ -1126,10 +1342,10 @@ $reminders
         local any_changes=false
         
         # Detect what actually changed
-        if has_source_changes; then
+        if tracked_has_source_changes "$task_num"; then
             source_changed=true
             any_changes=true
-        elif has_any_changes; then
+        elif tracked_has_any_changes "$task_num"; then
             any_changes=true
         fi
         
@@ -1166,9 +1382,12 @@ $reminders
         
         # Only commit if there are ACTUAL changes
         if [[ "$any_changes" == true ]]; then
-            do_commit "$task_num" "$total_count" "$task_text"
+            if do_commit "$task_num" "$total_count" "$task_text"; then
+                clear_manifest_for_task "$task_num"
+            fi
         else
             info "No changes to commit"
+            clear_manifest_for_task "$task_num"
         fi
         
         # Brief pause to avoid hammering
@@ -1270,6 +1489,37 @@ cmd_log() {
     echo -e "${CYAN}Full path:${NC} $selected"
 }
 
+cmd_tracked() {
+    local plan_file=$(get_current_plan)
+    [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+
+    local done_count=$(count_tasks "$plan_file" "done")
+    local task_num=$((done_count + 1))
+    local plan_name=$(get_plan_name)
+    local manifest_file=$(get_manifest_file_for_task "$task_num")
+
+    echo ""
+    echo -e "${BOLD}RALPH - TRACKED FILES${NC}"
+    echo ""
+    echo "Plan: $plan_name"
+    echo "Task: $task_num"
+
+    if [[ -z "$manifest_file" || ! -f "$manifest_file" ]]; then
+        warn "No active tracking session"
+        return 0
+    fi
+
+    echo "Manifest: $manifest_file"
+    echo ""
+    local tracked_files=$(get_tracked_files_for_task "$task_num" 2>/dev/null || true)
+    if [[ -z "$tracked_files" ]]; then
+        info "No files tracked yet"
+        return 0
+    fi
+
+    echo "$tracked_files"
+}
+
 cmd_review() {
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
@@ -1349,6 +1599,7 @@ ${BOLD}COMMANDS${NC}
     list            Show all plans with progress
     switch [n]      Switch to a different plan
     log             Show last Pi session status (errors, etc.)
+    tracked         Show tracked files for current task
     note "msg"      Add timestamped note to plan
     plan            Open plan in editor
     help            Show this help
@@ -1395,6 +1646,7 @@ main() {
         status) cmd_status "$@" ;;
         list|ls) cmd_list "$@" ;;
         switch) cmd_switch "$@" ;;
+        tracked) cmd_tracked "$@" ;;
         note)   cmd_note "$@" ;;
         plan)   cmd_plan "$@" ;;
         log)    cmd_log "$@" ;;
